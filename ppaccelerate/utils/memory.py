@@ -40,7 +40,7 @@ def release_memory(*objects):
 
         ```python
         >>> import torch
-        >>> from accelerate.utils import release_memory
+        >>> from ppaccelerate.utils import release_memory
 
         >>> a = torch.ones(1000, 1000).cuda()
         >>> b = torch.ones(1000, 1000).cuda()
@@ -91,7 +91,7 @@ def find_executable_batch_size(function: callable = None, starting_batch_size: i
     Example:
 
     ```python
-    >>> from accelerate.utils import find_executable_batch_size
+    >>> from ppaccelerate.utils import find_executable_batch_size
 
 
     >>> @find_executable_batch_size(starting_batch_size=128)

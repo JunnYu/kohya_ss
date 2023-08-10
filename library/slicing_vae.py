@@ -1,4 +1,4 @@
-# Modified from Diffusers to reduce VRAM usage
+# Modified from ppdiffusers to reduce VRAM usage
 
 # Copyright 2022 The HuggingFace Team. All rights reserved.
 #
@@ -21,11 +21,11 @@ import torch
 import torch.nn as nn
 
 
-from diffusers.configuration_utils import ConfigMixin, register_to_config
-from diffusers.modeling_utils import ModelMixin
-from diffusers.utils import BaseOutput
-from diffusers.models.unet_2d_blocks import UNetMidBlock2D, get_down_block, get_up_block, ResnetBlock2D
-from diffusers.models.vae import DecoderOutput, Encoder, AutoencoderKLOutput, DiagonalGaussianDistribution
+from ppdiffusers.configuration_utils import ConfigMixin, register_to_config
+from ppdiffusers.modeling_utils import ModelMixin
+from ppdiffusers.utils import BaseOutput
+from ppdiffusers.models.unet_2d_blocks import UNetMidBlock2D, get_down_block, get_up_block, ResnetBlock2D
+from ppdiffusers.models.vae import DecoderOutput, Encoder, AutoencoderKLOutput, DiagonalGaussianDistribution
 
 
 def slice_h(x, num_slices):

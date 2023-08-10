@@ -191,7 +191,7 @@ class PartialState:
         ```python
         >>> # Assuming two GPU processes
         >>> import time
-        >>> from accelerate.state import PartialState
+        >>> from ppaccelerate.state import PartialState
 
         >>> state = PartialState()
         >>> if state.is_main_process:
@@ -238,7 +238,7 @@ class PartialState:
 
         ```python
         # Assume there are two processes
-        from accelerate import PartialState
+        from ppaccelerate import PartialState
 
         state = PartialState()
         with state.split_between_processes(["A", "B", "C"]) as inputs:
@@ -306,7 +306,7 @@ class PartialState:
         Example:
 
         ```python
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
         >>> with accelerator.main_process_first():
@@ -327,7 +327,7 @@ class PartialState:
         Example:
 
         ```python
-        >>> from accelerate.state import PartialState
+        >>> from ppaccelerate.state import PartialState
 
         >>> state = PartialState()
         >>> with state.local_main_process_first():
@@ -348,7 +348,7 @@ class PartialState:
         Example:
 
         ```python
-        >>> from accelerate.state import PartialState
+        >>> from ppaccelerate.state import PartialState
 
         >>> state = PartialState()
 
@@ -378,7 +378,7 @@ class PartialState:
         Example:
         ```python
         # Assume we have 2 servers with 4 processes each.
-        from accelerate.state import PartialState
+        from ppaccelerate.state import PartialState
 
         state = PartialState()
 
@@ -409,7 +409,7 @@ class PartialState:
         Example:
         ```python
         # Assume we have 4 processes.
-        from accelerate.state import PartialState
+        from ppaccelerate.state import PartialState
 
         state = PartialState()
 
@@ -440,7 +440,7 @@ class PartialState:
         Example:
         ```python
         # Assume we have 4 processes.
-        from accelerate.state import PartialState
+        from ppaccelerate.state import PartialState
 
         state = PartialState()
 
@@ -473,7 +473,7 @@ class PartialState:
         Example:
         ```python
         # Assume we have 2 servers with 4 processes each.
-        from accelerate import Accelerator
+        from ppaccelerate import Accelerator
 
         accelerator = Accelerator()
 
@@ -655,7 +655,7 @@ class AcceleratorState:
 
         ```python
         # Assume there are two processes
-        from accelerate.state import AcceleratorState
+        from ppaccelerate.state import AcceleratorState
 
         state = AcceleratorState()
         with state.split_between_processes(["A", "B", "C"]) as inputs:

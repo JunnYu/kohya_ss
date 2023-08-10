@@ -6,8 +6,8 @@ from pathlib import Path
 from PIL import Image
 from tqdm import tqdm
 import torch
-from transformers import AutoProcessor, AutoModelForCausalLM
-from transformers.generation.utils import GenerationMixin
+from paddlenlp.transformers import AutoProcessor, AutoModelForCausalLM
+from paddlenlp.transformers.generation.utils import GenerationMixin
 
 import library.train_util as train_util
 

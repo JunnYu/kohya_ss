@@ -8,9 +8,9 @@ from multiprocessing import Value
 
 from tqdm import tqdm
 import torch
-from accelerate.utils import set_seed
+from ppaccelerate.utils import set_seed
 import diffusers
-from diffusers import DDPMScheduler
+from ppdiffusers import DDPMScheduler
 import library
 
 import library.train_util as train_util

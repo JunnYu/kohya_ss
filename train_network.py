@@ -12,8 +12,8 @@ import toml
 
 from tqdm import tqdm
 import torch
-from accelerate.utils import set_seed
-from diffusers import DDPMScheduler
+from ppaccelerate.utils import set_seed
+from ppdiffusers import DDPMScheduler
 from library import model_util
 
 import library.train_util as train_util

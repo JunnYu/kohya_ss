@@ -1,6 +1,6 @@
 import torch
 from typing import Union, List, Optional, Dict, Any, Tuple
-from diffusers.models.unet_2d_condition import UNet2DConditionOutput
+from ppdiffusers.models.unet_2d_condition import UNet2DConditionOutput
 
 from library.original_unet import SampleOutput
 

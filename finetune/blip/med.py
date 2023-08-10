@@ -21,11 +21,11 @@ from torch import nn
 from torch.nn import CrossEntropyLoss
 import torch.nn.functional as F
 
-from transformers.activations import ACT2FN
-from transformers.file_utils import (
+from paddlenlp.transformers.activations import ACT2FN
+from paddlenlp.transformers.file_utils import (
     ModelOutput,
 )
-from transformers.modeling_outputs import (
+from paddlenlp.transformers.modeling_outputs import (
     BaseModelOutputWithPastAndCrossAttentions,
     BaseModelOutputWithPoolingAndCrossAttentions,
     CausalLMOutputWithCrossAttentions,
@@ -36,14 +36,14 @@ from transformers.modeling_outputs import (
     SequenceClassifierOutput,
     TokenClassifierOutput,
 )
-from transformers.modeling_utils import (
+from paddlenlp.transformers.modeling_utils import (
     PreTrainedModel,
     apply_chunking_to_forward,
     find_pruneable_heads_and_indices,
     prune_linear_layer,
 )
-from transformers.utils import logging
-from transformers.models.bert.configuration_bert import BertConfig
+from paddlenlp.transformers.utils import logging
+from paddlenlp.transformers.models.bert.configuration_bert import BertConfig
 
 
 logger = logging.get_logger(__name__)
@@ -870,7 +870,7 @@ class BertLMHeadModel(BertPreTrainedModel):
             decoding (see :obj:`past_key_values`).
         Returns:
         Example::
-            >>> from transformers import BertTokenizer, BertLMHeadModel, BertConfig
+            >>> from paddlenlp.transformers import BertTokenizer, BertLMHeadModel, BertConfig
             >>> import torch
             >>> tokenizer = BertTokenizer.from_pretrained('bert-base-cased')
             >>> config = BertConfig.from_pretrained("bert-base-cased")

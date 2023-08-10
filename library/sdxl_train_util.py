@@ -4,9 +4,9 @@ import math
 import os
 from typing import Optional
 import torch
-from accelerate import init_empty_weights
+from ppaccelerate import init_empty_weights
 from tqdm import tqdm
-from transformers import CLIPTokenizer
+from paddlenlp.transformers import CLIPTokenizer
 from library import model_util, sdxl_model_util, train_util, sdxl_original_unet
 from library.sdxl_lpw_stable_diffusion import SdxlStableDiffusionLongPromptWeightingPipeline
 
@@ -70,7 +70,7 @@ def _load_target_model(name_or_path: str, vae_path: Optional[str], model_version
         ) = sdxl_model_util.load_models_from_sdxl_checkpoint(model_version, name_or_path, device, weight_dtype)
     else:
         # Diffusers model is loaded to CPU
-        from diffusers import StableDiffusionXLPipeline
+        from ppdiffusers import StableDiffusionXLPipeline
 
         variant = "fp16" if weight_dtype == torch.float16 else None
         print(f"load Diffusers pretrained models: {name_or_path}, variant={variant}")

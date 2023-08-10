@@ -65,8 +65,8 @@ class AutocastKwargs(KwargsHandler):
     Example:
 
     ```python
-    from accelerate import Accelerator
-    from accelerate.utils import AutocastKwargs
+    from ppaccelerate import Accelerator
+    from ppaccelerate.utils import AutocastKwargs
 
     kwargs = AutocastKwargs(cache_enabled=True)
     accelerator = Accelerator(kwargs_handlers=[kwargs])
@@ -98,8 +98,8 @@ class DistributedDataParallelKwargs(KwargsHandler):
     Example:
 
     ```python
-    from accelerate import Accelerator
-    from accelerate.utils import DistributedDataParallelKwargs
+    from ppaccelerate import Accelerator
+    from ppaccelerate.utils import DistributedDataParallelKwargs
 
     kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
     accelerator = Accelerator(kwargs_handlers=[kwargs])
@@ -131,8 +131,8 @@ class GradScalerKwargs(KwargsHandler):
     Example:
 
     ```python
-    from accelerate import Accelerator
-    from accelerate.utils import GradScalerKwargs
+    from ppaccelerate import Accelerator
+    from ppaccelerate.utils import GradScalerKwargs
 
     kwargs = GradScalerKwargs(backoff_filter=0.25)
     accelerator = Accelerator(kwargs_handlers=[kwargs])
@@ -156,8 +156,8 @@ class InitProcessGroupKwargs(KwargsHandler):
 
     ```python
     from datetime import timedelta
-    from accelerate import Accelerator
-    from accelerate.utils import InitProcessGroupKwargs
+    from ppaccelerate import Accelerator
+    from ppaccelerate.utils import InitProcessGroupKwargs
 
     kwargs = InitProcessGroupKwargs(timeout=timedelta(seconds=800))
     accelerator = Accelerator(kwargs_handlers=[kwargs])

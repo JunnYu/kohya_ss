@@ -9,17 +9,17 @@ import numpy as np
 import PIL.Image
 import torch
 from packaging import version
-from transformers import CLIPFeatureExtractor, CLIPTextModel, CLIPTokenizer
+from paddlenlp.transformers import CLIPFeatureExtractor, CLIPTextModel, CLIPTokenizer
 
 import diffusers
-from diffusers import SchedulerMixin, StableDiffusionPipeline
-from diffusers.models import AutoencoderKL, UNet2DConditionModel
-from diffusers.pipelines.stable_diffusion import StableDiffusionPipelineOutput, StableDiffusionSafetyChecker
-from diffusers.utils import logging
+from ppdiffusers import SchedulerMixin, StableDiffusionPipeline
+from ppdiffusers.models import AutoencoderKL, UNet2DConditionModel
+from ppdiffusers.pipelines.stable_diffusion import StableDiffusionPipelineOutput, StableDiffusionSafetyChecker
+from ppdiffusers.utils import logging
 
 
 try:
-    from diffusers.utils import PIL_INTERPOLATION
+    from ppdiffusers.utils import PIL_INTERPOLATION
 except ImportError:
     if version.parse(version.parse(PIL.__version__).base_version) >= version.parse("9.1.0"):
         PIL_INTERPOLATION = {
@@ -565,7 +565,7 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
     def _execution_device(self):
         r"""
         Returns the device on which the pipeline's models will be executed. After calling
-        `pipeline.enable_sequential_cpu_offload()` the execution device can only be inferred from Accelerate's module
+        `pipeline.enable_sequential_cpu_offload()` the execution device can only be inferred from ppaccelerate's module
         hooks.
         """
         if self.device != torch.device("meta") or not hasattr(self.unet, "_hf_hook"):

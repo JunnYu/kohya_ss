@@ -18,7 +18,7 @@ from typing import (
     Tuple,
     Union,
 )
-from accelerate import Accelerator
+from ppaccelerate import Accelerator
 import gc
 import glob
 import math
@@ -34,10 +34,10 @@ import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.optim import Optimizer
 from torchvision import transforms
-from transformers import CLIPTokenizer, CLIPTextModel, CLIPTextModelWithProjection
+from paddlenlp.transformers import CLIPTokenizer, CLIPTextModel, CLIPTextModelWithProjection
 import transformers
-from diffusers.optimization import SchedulerType, TYPE_TO_SCHEDULER_FUNCTION
-from diffusers import (
+from ppdiffusers.optimization import SchedulerType, TYPE_TO_SCHEDULER_FUNCTION
+from ppdiffusers import (
     StableDiffusionPipeline,
     DDPMScheduler,
     EulerAncestralDiscreteScheduler,
@@ -3527,7 +3527,7 @@ def get_optimizer(args, trainable_params):
     return optimizer_name, optimizer_args, optimizer
 
 
-# Modified version of get_scheduler() function from diffusers.optimizer.get_scheduler
+# Modified version of get_scheduler() function from ppdiffusers.optimizer.get_scheduler
 # Add some checking and features to the original function.
 
 

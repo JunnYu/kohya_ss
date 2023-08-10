@@ -5,7 +5,7 @@ import argparse
 import glob
 import os
 import cv2
-from diffusers import AutoencoderKL
+from ppdiffusers import AutoencoderKL
 
 from typing import Dict, List
 import numpy as np

@@ -84,7 +84,7 @@ def get_logger(name: str, log_level: str = None):
     Example:
 
     ```python
-    >>> from accelerate.logging import get_logger
+    >>> from ppaccelerate.logging import get_logger
 
     >>> logger = get_logger(__name__)
 
@@ -95,7 +95,7 @@ def get_logger(name: str, log_level: str = None):
     >>> logger.info("My log")
     >>> logger.debug("My second log")
 
-    >>> from accelerate import Accelerator
+    >>> from ppaccelerate import Accelerator
 
     >>> accelerator = Accelerator()
     >>> array = ["a", "b", "c", "d"]

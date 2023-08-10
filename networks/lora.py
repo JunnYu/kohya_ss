@@ -6,8 +6,8 @@
 import math
 import os
 from typing import Dict, List, Optional, Tuple, Type, Union
-from diffusers import AutoencoderKL
-from transformers import CLIPTextModel
+from ppdiffusers import AutoencoderKL
+from paddlenlp.transformers import CLIPTextModel
 import numpy as np
 import torch
 import re

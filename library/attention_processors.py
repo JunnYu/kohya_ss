@@ -2,7 +2,7 @@ import math
 from typing import Any
 from einops import rearrange
 import torch
-from diffusers.models.attention_processor import Attention
+from ppdiffusers.models.attention_processor import Attention
 
 
 # flash attention forwards and backwards

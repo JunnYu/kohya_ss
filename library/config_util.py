@@ -27,7 +27,7 @@ from voluptuous import (
   Required,
   Schema,
 )
-from transformers import CLIPTokenizer
+from paddlenlp.transformers import CLIPTokenizer
 
 from . import train_util
 from .train_util import (

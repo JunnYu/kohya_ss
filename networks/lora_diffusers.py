@@ -5,10 +5,10 @@ import bisect
 import math
 import random
 from typing import Any, Dict, List, Mapping, Optional, Union
-from diffusers import UNet2DConditionModel
+from ppdiffusers import UNet2DConditionModel
 import numpy as np
 from tqdm import tqdm
-from transformers import CLIPTextModel
+from paddlenlp.transformers import CLIPTextModel
 import torch
 
 
@@ -468,7 +468,7 @@ if __name__ == "__main__":
     # sample code to use LoRANetwork
     import os
     import argparse
-    from diffusers import StableDiffusionPipeline, StableDiffusionXLPipeline
+    from ppdiffusers import StableDiffusionPipeline, StableDiffusionXLPipeline
     import torch
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

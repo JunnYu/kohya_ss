@@ -4,7 +4,7 @@ from tqdm import tqdm
 from library import model_util
 import library.train_util as train_util
 import argparse
-from transformers import CLIPTokenizer
+from paddlenlp.transformers import CLIPTokenizer
 import torch
 
 import library.model_util as model_util

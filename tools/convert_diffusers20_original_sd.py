@@ -3,7 +3,7 @@
 import argparse
 import os
 import torch
-from diffusers import StableDiffusionPipeline
+from ppdiffusers import StableDiffusionPipeline
 
 import library.model_util as model_util
 

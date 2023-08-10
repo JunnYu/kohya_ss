@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-from diffusers.models.attention_processor import (
+from ppdiffusers.models.attention_processor import (
     Attention,
     AttnProcessor2_0,
     SlicedAttnProcessor,

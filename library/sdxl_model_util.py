@@ -1,10 +1,10 @@
 import torch
-from accelerate import init_empty_weights
-from accelerate.utils.modeling import set_module_tensor_to_device
+from ppaccelerate import init_empty_weights
+from ppaccelerate.utils.modeling import set_module_tensor_to_device
 from safetensors.torch import load_file, save_file
-from transformers import CLIPTextModel, CLIPTextConfig, CLIPTextModelWithProjection, CLIPTokenizer
+from paddlenlp.transformers import CLIPTextModel, CLIPTextConfig, CLIPTextModelWithProjection, CLIPTokenizer
 from typing import List
-from diffusers import AutoencoderKL, EulerDiscreteScheduler, UNet2DConditionModel
+from ppdiffusers import AutoencoderKL, EulerDiscreteScheduler, UNet2DConditionModel
 from library import model_util
 from library import sdxl_original_unet
 
@@ -516,7 +516,7 @@ def save_stable_diffusion_checkpoint(
 def save_diffusers_checkpoint(
     output_dir, text_encoder1, text_encoder2, unet, pretrained_model_name_or_path, vae=None, use_safetensors=False, save_dtype=None
 ):
-    from diffusers import StableDiffusionXLPipeline
+    from ppdiffusers import StableDiffusionXLPipeline
 
     # convert U-Net
     unet_sd = unet.state_dict()

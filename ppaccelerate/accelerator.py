@@ -385,7 +385,7 @@ class Accelerator:
 
         ```python
         # Assume there are two processes
-        from accelerate import Accelerator
+        from ppaccelerate import Accelerator
 
         accelerator = Accelerator()
         with accelerator.split_between_processes(["A", "B", "C"]) as inputs:
@@ -417,7 +417,7 @@ class Accelerator:
         Example:
 
         ```python
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
 
@@ -456,7 +456,7 @@ class Accelerator:
         Example:
         ```python
         # Assume we have 2 servers with 4 processes each.
-        from accelerate import Accelerator
+        from ppaccelerate import Accelerator
 
         accelerator = Accelerator()
 
@@ -498,7 +498,7 @@ class Accelerator:
         Example:
         ```python
         # Assume we have 4 processes.
-        from accelerate import Accelerator
+        from ppaccelerate import Accelerator
 
         accelerator = Accelerator()
 
@@ -540,7 +540,7 @@ class Accelerator:
         Example:
         ```python
         # Assume we have 4 processes.
-        from accelerate import Accelerator
+        from ppaccelerate import Accelerator
 
         accelerator = Accelerator()
 
@@ -585,7 +585,7 @@ class Accelerator:
         Example:
         ```python
         # Assume we have 2 servers with 4 processes each.
-        from accelerate import Accelerator
+        from ppaccelerate import Accelerator
 
         accelerator = Accelerator()
 
@@ -629,7 +629,7 @@ class Accelerator:
         Example:
 
         ```python
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
         >>> with accelerator.main_process_first():
@@ -651,7 +651,7 @@ class Accelerator:
         Example:
 
         ```python
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
         >>> with accelerator.local_main_process_first():
@@ -678,7 +678,7 @@ class Accelerator:
         Example:
 
         ```python
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
         >>> dataloader, model, optimizer = accelerator.prepare(dataloader, model, optimizer)
@@ -720,7 +720,7 @@ class Accelerator:
         #         Example:
 
         #         ```python
-        #         >>> from accelerate import Accelerator
+        #         >>> from ppaccelerate import Accelerator
 
         #         >>> accelerator = Accelerator()
         #         >>> dataloader, model, optimizer = accelerator.prepare(dataloader, model, optimizer)
@@ -792,7 +792,7 @@ class Accelerator:
         Example:
 
         ```python
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator(gradient_accumulation_steps=1)
         >>> dataloader, model, optimizer, scheduler = accelerator.prepare(dataloader, model, optimizer, scheduler)
@@ -824,7 +824,7 @@ class Accelerator:
         Example:
 
         ```python
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
         >>> accelerator.print("Hello world!")
@@ -876,7 +876,7 @@ class Accelerator:
         Examples:
 
         ```python
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
         >>> # Assume a model, optimizer, data_loader and scheduler are defined
@@ -884,7 +884,7 @@ class Accelerator:
         ```
 
         ```python
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
         >>> # Assume a model, optimizer, data_loader and scheduler are defined
@@ -947,7 +947,7 @@ class Accelerator:
         Example:
 
         ```python
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
         >>> # Assume a model is defined
@@ -1010,7 +1010,7 @@ class Accelerator:
 
         ```python
         >>> import torch
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
         >>> data_loader = paddle.io.DataLoader(...)
@@ -1053,7 +1053,7 @@ class Accelerator:
 
         ```python
         >>> import torch
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
         >>> optimizer = torch.optim.Adam(...)
@@ -1084,7 +1084,7 @@ class Accelerator:
 
         ```python
         >>> import torch
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
         >>> optimizer = torch.optim.Adam(...)
@@ -1122,7 +1122,7 @@ class Accelerator:
         Example:
 
         ```python
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator(gradient_accumulation_steps=2)
         >>> outputs = model(inputs)
@@ -1150,7 +1150,7 @@ class Accelerator:
         Example:
 
         ```python
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
         >>> model, optimizer = accelerator.prepare(model, optimizer)
@@ -1181,7 +1181,7 @@ class Accelerator:
         Example:
 
         ```python
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator(gradient_accumulation_steps=2)
         >>> dataloader, model, optimizer, scheduler = accelerator.prepare(dataloader, model, optimizer, scheduler)
@@ -1206,7 +1206,7 @@ class Accelerator:
         Example:
 
         ```python
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator(gradient_accumulation_steps=2)
         >>> dataloader, model, optimizer, scheduler = accelerator.prepare(dataloader, model, optimizer, scheduler)
@@ -1245,7 +1245,7 @@ class Accelerator:
         ```python
         >>> # Assuming four processes
         >>> import torch
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
         >>> process_tensor = torch.tensor([accelerator.process_index])
@@ -1270,7 +1270,7 @@ class Accelerator:
         ```python
         >>> # Assuming two processes, with a batch size of 5 on a dataset with 9 samples
         >>> import torch
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
         >>> dataloader = paddle.io.DataLoader(range(9), batch_size=5)
@@ -1330,7 +1330,7 @@ class Accelerator:
         ```python
         >>> # Assuming two processes
         >>> import torch
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
         >>> process_tensor = torch.arange(accelerator.num_processes) + 1 + (2 * accelerator.process_index)
@@ -1366,7 +1366,7 @@ class Accelerator:
         ```python
         >>> # Assuming two processes, with the first processes having a tensor of size 1 and the second of size 2
         >>> import torch
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
         >>> process_tensor = torch.arange(accelerator.process_index + 1).to(accelerator.device)
@@ -1396,7 +1396,7 @@ class Accelerator:
         ```python
         >>> # Assuming two GPU processes
         >>> from torch.nn.parallel import DistributedDataParallel
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
         >>> model = accelerator.prepare(MyModel())
@@ -1420,7 +1420,7 @@ class Accelerator:
         ```python
         >>> # Assuming two GPU processes
         >>> import time
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
         >>> if accelerator.is_main_process:
@@ -1454,7 +1454,7 @@ class Accelerator:
         Example:
 
         ```python
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator(log_with="tensorboard")
         >>> accelerator.init_trackers(
@@ -1499,7 +1499,7 @@ class Accelerator:
         Example:
 
         ```python
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator(log_with="tensorboard")
         >>> accelerator.init_trackers("my_project")
@@ -1534,7 +1534,7 @@ class Accelerator:
         Example:
 
         ```python
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator(log_with="tensorboard")
         >>> accelerator.init_trackers("my_project")
@@ -1553,7 +1553,7 @@ class Accelerator:
         Example:
 
         ```python
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator(log_with="tensorboard")
         >>> accelerator.init_trackers("my_project")
@@ -1575,7 +1575,7 @@ class Accelerator:
         Example:
 
         ```python
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
         >>> arr = [0, 1, 2, 3]
@@ -1616,7 +1616,7 @@ class Accelerator:
         Example:
 
         ```python
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
         >>> model = ...
@@ -1771,7 +1771,7 @@ class Accelerator:
         Example:
 
         ```python
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
         >>> model, optimizer, lr_scheduler = ...
@@ -1885,7 +1885,7 @@ class Accelerator:
         Example:
 
         ```python
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
         >>> model, optimizer, lr_scheduler = ...
@@ -1971,7 +1971,7 @@ class Accelerator:
         Example:
 
         ```python
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
         >>> model, optimizer, scheduler = ...
@@ -1996,7 +1996,7 @@ class Accelerator:
         Example:
 
         ```python
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
         >>> model, optimizer, scheduler = ...
@@ -2049,7 +2049,7 @@ class Accelerator:
 
         ```python
         >>> import torch
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
         >>> net = torch.nn.Linear(2, 2)
@@ -2086,7 +2086,7 @@ class Accelerator:
         Example:
 
         ```python
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
         >>> # Assume `CustomObject` has a `state_dict` and `load_state_dict` function.
@@ -2118,7 +2118,7 @@ class Accelerator:
         Example:
 
         ```python
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator(mixed_precision="fp16")
         >>> with accelerator.autocast():
@@ -2164,7 +2164,7 @@ class Accelerator:
         Example:
 
         ```python
-        >>> from accelerate import Accelerator
+        >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
         >>> dataloader, model, optimizer, scheduler = accelerator.prepare(dataloader, model, optimizer, scheduler)

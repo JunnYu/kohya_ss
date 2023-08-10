@@ -3,7 +3,7 @@
 # コードの多くはDiffusersからコピーしている
 # 制約として、モデルのstate_dictがDiffusers 0.10.2のものと同じ形式である必要がある
 
-# Copy from Diffusers 0.10.2 for Stable Diffusion. Most of the code is copied from Diffusers.
+# Copy from ppdiffusers 0.10.2 for Stable Diffusion. Most of the code is copied from ppdiffusers.
 # Unnecessary parts are deleted by condition branching.
 # As a constraint, the state_dict of the model must be in the same format as that of Diffusers 0.10.2
 

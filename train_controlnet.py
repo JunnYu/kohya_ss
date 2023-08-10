@@ -12,8 +12,8 @@ import toml
 from tqdm import tqdm
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
-from accelerate.utils import set_seed
-from diffusers import DDPMScheduler, ControlNetModel
+from ppaccelerate.utils import set_seed
+from ppdiffusers import DDPMScheduler, ControlNetModel
 from safetensors.torch import load_file
 
 import library.model_util as model_util

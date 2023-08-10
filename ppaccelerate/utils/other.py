@@ -89,7 +89,7 @@ def clear_environment():
 
     ```python
     >>> import os
-    >>> from accelerate.utils import clear_environment
+    >>> from ppaccelerate.utils import clear_environment
 
     >>> os.environ["FOO"] = "bar"
     >>> with clear_environment():
@@ -122,7 +122,7 @@ def patch_environment(**kwargs):
 
     ```python
     >>> import os
-    >>> from accelerate.utils import patch_environment
+    >>> from ppaccelerate.utils import patch_environment
 
     >>> with patch_environment(FOO="bar"):
     ...     print(os.environ["FOO"])  # prints "bar"

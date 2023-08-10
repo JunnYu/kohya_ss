@@ -256,7 +256,7 @@ def get_timestep_embedding(
     # scale embeddings
     emb = scale * emb
 
-    # concat sine and cosine embeddings: flipped from Diffusers original ver because always flip_sin_to_cos=True
+    # concat sine and cosine embeddings: flipped from ppdiffusers original ver because always flip_sin_to_cos=True
     emb = torch.cat([torch.cos(emb), torch.sin(emb)], dim=-1)
 
     # zero pad

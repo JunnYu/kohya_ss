@@ -5,7 +5,7 @@ import math
 from multiprocessing import Value
 import os
 
-from accelerate.utils import set_seed
+from ppaccelerate.utils import set_seed
 import torch
 from tqdm import tqdm
 

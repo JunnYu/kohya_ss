@@ -54,8 +54,8 @@ import importlib
 import inspect
 import time
 import zipfile
-from diffusers.utils import deprecate
-from diffusers.configuration_utils import FrozenDict
+from ppdiffusers.utils import deprecate
+from ppdiffusers.configuration_utils import FrozenDict
 import argparse
 import math
 import os
@@ -66,7 +66,7 @@ import diffusers
 import numpy as np
 import torch
 import torchvision
-from diffusers import (
+from ppdiffusers import (
     AutoencoderKL,
     DDPMScheduler,
     EulerAncestralDiscreteScheduler,
@@ -85,7 +85,7 @@ from diffusers import (
 from einops import rearrange
 from tqdm import tqdm
 from torchvision import transforms
-from transformers import CLIPTextModel, CLIPTokenizer, CLIPModel, CLIPTextConfig
+from paddlenlp.transformers import CLIPTextModel, CLIPTokenizer, CLIPModel, CLIPTextConfig
 import PIL
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
@@ -526,7 +526,7 @@ class PipelineLike:
         # accelerateが必要になるのでとりあえず省略
         raise NotImplementedError("cpu_offload is omitted.")
         # if is_accelerate_available():
-        #   from accelerate import cpu_offload
+        #   from ppaccelerate import cpu_offload
         # else:
         #   raise ImportError("Please install accelerate via `pip install accelerate`")
 

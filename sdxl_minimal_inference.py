@@ -10,8 +10,8 @@ from einops import repeat
 import numpy as np
 import torch
 from tqdm import tqdm
-from transformers import CLIPTokenizer
-from diffusers import EulerDiscreteScheduler
+from paddlenlp.transformers import CLIPTokenizer
+from ppdiffusers import EulerDiscreteScheduler
 from PIL import Image
 import open_clip
 from safetensors.torch import load_file
@@ -28,7 +28,7 @@ SCHEDLER_SCHEDULE = "scaled_linear"
 
 
 # Time EmbeddingはDiffusersからのコピー
-# Time Embedding is copied from Diffusers
+# Time Embedding is copied from ppdiffusers
 
 
 def timestep_embedding(timesteps, dim, max_period=10000, repeat_only=False):
@@ -263,7 +263,7 @@ if __name__ == "__main__":
         scheduler.set_timesteps(steps, DEVICE)
 
         # このへんはDiffusersからのコピペ
-        # Copy from Diffusers
+        # Copy from ppdiffusers
         timesteps = scheduler.timesteps.to(DEVICE)  # .to(DTYPE)
         num_latent_input = 2
         with torch.no_grad():

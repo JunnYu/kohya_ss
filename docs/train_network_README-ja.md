@@ -339,7 +339,7 @@ gen_img_diffusers.pyに、--network_module、--network_weightsの各オプショ
 
 ```python
 import torch
-from diffusers import StableDiffusionPipeline
+from ppdiffusers import StableDiffusionPipeline
 from networks.lora import LoRAModule, create_network_from_weights
 from safetensors.torch import load_file
 
