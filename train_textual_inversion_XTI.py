@@ -277,7 +277,7 @@ def train(args):
         vae.to(accelerator.device, dtype=weight_dtype)
         vae.requires_grad_(False)
         vae.eval()
-        with torch.no_grad():
+        with paddle.no_grad():
             train_dataset_group.cache_latents(vae, args.vae_batch_size, args.cache_latents_to_disk, accelerator.is_main_process)
         vae.to("cpu")
         if torch.cuda.is_available():
@@ -421,7 +421,7 @@ def train(args):
         for step, batch in enumerate(train_dataloader):
             current_step.value = global_step
             with accelerator.accumulate(text_encoder):
-                with torch.no_grad():
+                with paddle.no_grad():
                     if "latents" in batch and batch["latents"] is not None:
                         latents = batch["latents"].to(accelerator.device)
                     else:
@@ -477,7 +477,7 @@ def train(args):
                 optimizer.zero_grad(set_to_none=True)
 
                 # Let's make sure we don't update any embedding weights besides the newly added token
-                with torch.no_grad():
+                with paddle.no_grad():
                     accelerator.unwrap_model(text_encoder).get_input_embeddings().weight[index_no_updates] = orig_embeds_params[
                         index_no_updates
                     ]

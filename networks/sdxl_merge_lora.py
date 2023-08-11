@@ -216,7 +216,7 @@ def merge(args):
         if p == "fp16":
             return torch.float16
         if p == "bf16":
-            return torch.bfloat16
+            return paddle.bfloat16
         return None
 
     merge_dtype = str_to_dtype(args.precision)

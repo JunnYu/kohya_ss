@@ -9,7 +9,7 @@ from ppdiffusers import UNet2DConditionModel
 import numpy as np
 from tqdm import tqdm
 from paddlenlp.transformers import CLIPTextModel
-import torch
+import paddle
 
 
 def make_unet_conversion_map() -> Dict[str, str]:
@@ -100,7 +100,7 @@ def make_unet_conversion_map() -> Dict[str, str]:
 UNET_CONVERSION_MAP = make_unet_conversion_map()
 
 
-class LoRAModule(torch.nn.Module):
+class LoRAModule(paddle.nn.Layer):
     """
     replaces forward method of the original Linear, instead of replacing the original Linear module.
     """
@@ -108,7 +108,7 @@ class LoRAModule(torch.nn.Module):
     def __init__(
         self,
         lora_name,
-        org_module: torch.nn.Module,
+        org_module: paddle.nn.Layer,
         multiplier=1.0,
         lora_dim=4,
         alpha=1,
@@ -117,35 +117,36 @@ class LoRAModule(torch.nn.Module):
         super().__init__()
         self.lora_name = lora_name
 
-        if org_module.__class__.__name__ == "Conv2d":
-            in_dim = org_module.in_channels
-            out_dim = org_module.out_channels
+        if org_module.__class__.__name__ == "Conv2D":
+            in_dim = org_module._in_channels
+            out_dim = org_module._out_channels
         else:
-            in_dim = org_module.in_features
-            out_dim = org_module.out_features
+            in_features, out_features = org_module.weight.shape
+            in_dim = in_features
+            out_dim = out_features
 
         self.lora_dim = lora_dim
 
-        if org_module.__class__.__name__ == "Conv2d":
-            kernel_size = org_module.kernel_size
-            stride = org_module.stride
-            padding = org_module.padding
-            self.lora_down = torch.nn.Conv2d(in_dim, self.lora_dim, kernel_size, stride, padding, bias=False)
-            self.lora_up = torch.nn.Conv2d(self.lora_dim, out_dim, (1, 1), (1, 1), bias=False)
+        if org_module.__class__.__name__ == "Conv2D":
+            kernel_size = org_module._kernel_size
+            stride = org_module._stride
+            padding = org_module._padding
+            self.lora_down = paddle.nn.Conv2D(in_dim, self.lora_dim, kernel_size, stride, padding, bias_attr=False)
+            self.lora_up = paddle.nn.Conv2D(self.lora_dim, out_dim, (1, 1), (1, 1), bias_attr=False)
         else:
-            self.lora_down = torch.nn.Linear(in_dim, self.lora_dim, bias=False)
-            self.lora_up = torch.nn.Linear(self.lora_dim, out_dim, bias=False)
+            self.lora_down = paddle.nn.Linear(in_dim, self.lora_dim, bias_attr=False)
+            self.lora_up = paddle.nn.Linear(self.lora_dim, out_dim, bias_attr=False)
 
-        if type(alpha) == torch.Tensor:
-            alpha = alpha.detach().float().numpy()  # without casting, bf16 causes error
+        if type(alpha) == paddle.Tensor:
+            alpha = alpha.detach().astype("float32").numpy()  # without casting, bf16 causes error
         alpha = self.lora_dim if alpha is None or alpha == 0 else alpha
         self.scale = alpha / self.lora_dim
-        self.register_buffer("alpha", torch.tensor(alpha))  # 勾配計算に含めない / not included in gradient calculation
+        self.register_buffer("alpha", paddle.to_tensor(alpha))  # 定数として扱える
 
         # same as microsoft's
-        torch.nn.init.kaiming_uniform_(self.lora_down.weight, a=math.sqrt(5))
-        torch.nn.init.zeros_(self.lora_up.weight)
-
+        paddle.nn.init.kaiming_uniform_(self.lora_down.weight, a=math.sqrt(5))
+        paddle.nn.init.zeros_(self.lora_up.weight)
+    
         self.multiplier = multiplier
         self.org_module = [org_module]
         self.enabled = True
@@ -182,7 +183,7 @@ class LoRAModule(torch.nn.Module):
         # get org weight
         org_sd = self.org_module[0].state_dict()
         org_weight = org_sd["weight"]
-        weight = org_weight + lora_weight.to(org_weight.device, dtype=org_weight.dtype)
+        weight = org_weight + lora_weight.to(dtype=org_weight.dtype)
 
         # set weight to org_module
         org_sd["weight"] = weight
@@ -196,7 +197,7 @@ class LoRAModule(torch.nn.Module):
         # get org weight
         org_sd = self.org_module[0].state_dict()
         org_weight = org_sd["weight"]
-        weight = org_weight - lora_weight.to(org_weight.device, dtype=org_weight.dtype)
+        weight = org_weight - lora_weight.to(dtype=org_weight.dtype)
 
         # set weight to org_module
         org_sd["weight"] = weight
@@ -267,7 +268,7 @@ def merge_lora_weights(pipe, weights_sd: Dict, multiplier: float = 1.0):
 
 
 # block weightや学習に対応しない簡易版 / simple version without block weight and training
-class LoRANetwork(torch.nn.Module):
+class LoRANetwork(paddle.nn.Layer):
     UNET_TARGET_REPLACE_MODULE = ["Transformer2DModel"]
     UNET_TARGET_REPLACE_MODULE_CONV2D_3X3 = ["ResnetBlock2D", "Downsample2D", "Upsample2D"]
     TEXT_ENCODER_TARGET_REPLACE_MODULE = ["CLIPAttention", "CLIPMLP"]
@@ -301,8 +302,8 @@ class LoRANetwork(torch.nn.Module):
         def create_modules(
             is_unet: bool,
             text_encoder_idx: Optional[int],  # None, 1, 2
-            root_module: torch.nn.Module,
-            target_replace_modules: List[torch.nn.Module],
+            root_module: paddle.nn.Layer,
+            target_replace_modules: List[paddle.nn.Layer],
         ) -> List[LoRAModule]:
             prefix = (
                 self.LORA_PREFIX_UNET

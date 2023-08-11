@@ -128,7 +128,7 @@ def train(args):
         vae.to(accelerator.device, dtype=weight_dtype)
         vae.requires_grad_(False)
         vae.eval()
-        with torch.no_grad():
+        with paddle.no_grad():
             train_dataset_group.cache_latents(vae, args.vae_batch_size, args.cache_latents_to_disk, accelerator.is_main_process)
         vae.to("cpu")
         if torch.cuda.is_available():
@@ -279,7 +279,7 @@ def train(args):
                 text_encoder.requires_grad_(False)
 
             with accelerator.accumulate(unet):
-                with torch.no_grad():
+                with paddle.no_grad():
                     # latentに変換
                     if cache_latents:
                         latents = batch["latents"].to(accelerator.device)

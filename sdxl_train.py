@@ -123,7 +123,7 @@ def train(args):
 
     # mixed precisionに対応した型を用意しておき適宜castする
     weight_dtype, save_dtype = train_util.prepare_dtype(args)
-    vae_dtype = torch.float32 if args.no_half_vae else weight_dtype
+    vae_dtype = paddle.float32 if args.no_half_vae else weight_dtype
 
     # モデルを読み込む
     (
@@ -155,7 +155,7 @@ def train(args):
 
     # Diffusers版のxformers使用フラグを設定する関数
     def set_diffusers_xformers_flag(model, valid):
-        def fn_recursive_set_mem_eff(module: torch.nn.Module):
+        def fn_recursive_set_mem_eff(module: paddle.nn.Layer):
             if hasattr(module, "set_use_memory_efficient_attention_xformers"):
                 module.set_use_memory_efficient_attention_xformers(valid)
 
@@ -182,7 +182,7 @@ def train(args):
         vae.to(accelerator.device, dtype=vae_dtype)
         vae.requires_grad_(False)
         vae.eval()
-        with torch.no_grad():
+        with paddle.no_grad():
             train_dataset_group.cache_latents(vae, args.vae_batch_size, args.cache_latents_to_disk, accelerator.is_main_process)
         vae.to("cpu")
         if torch.cuda.is_available():
@@ -215,7 +215,7 @@ def train(args):
         # TextEncoderの出力をキャッシュする
         if args.cache_text_encoder_outputs:
             # Text Encodes are eval and no grad
-            with torch.no_grad():
+            with paddle.no_grad():
                 train_dataset_group.cache_text_encoder_outputs(
                     (tokenizer1, tokenizer2),
                     (text_encoder1, text_encoder2),
@@ -309,8 +309,8 @@ def train(args):
     # TextEncoderの出力をキャッシュするときにはCPUへ移動する
     if args.cache_text_encoder_outputs:
         # move Text Encoders for sampling images. Text Encoder doesn't work on CPU with fp16
-        text_encoder1.to("cpu", dtype=torch.float32)
-        text_encoder2.to("cpu", dtype=torch.float32)
+        text_encoder1.to("cpu", dtype=paddle.float32)
+        text_encoder2.to("cpu", dtype=paddle.float32)
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
     else:
@@ -374,7 +374,7 @@ def train(args):
                 if "latents" in batch and batch["latents"] is not None:
                     latents = batch["latents"].to(accelerator.device).to(dtype=weight_dtype)
                 else:
-                    with torch.no_grad():
+                    with paddle.no_grad():
                         # latentに変換
                         latents = vae.encode(batch["images"].to(vae_dtype)).latent_dist.sample().to(weight_dtype)
 

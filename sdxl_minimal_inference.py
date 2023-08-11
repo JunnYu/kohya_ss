@@ -42,7 +42,7 @@ def timestep_embedding(timesteps, dim, max_period=10000, repeat_only=False):
     """
     if not repeat_only:
         half = dim // 2
-        freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half).to(
+        freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=paddle.float32) / half).to(
             device=timesteps.device
         )
         args = timesteps[:, None].float() * freqs[None]
@@ -136,7 +136,7 @@ if __name__ == "__main__":
     vae_dtype = DTYPE
     if DTYPE == torch.float16:
         print("use float32 for vae")
-        vae_dtype = torch.float32
+        vae_dtype = paddle.float32
     vae.to(DEVICE, dtype=vae_dtype)
     vae.eval()
 
@@ -177,11 +177,11 @@ if __name__ == "__main__":
     def generate_image(prompt, prompt2, negative_prompt, seed=None):
         # 将来的にサイズ情報も変えられるようにする / Make it possible to change the size information in the future
         # prepare embedding
-        with torch.no_grad():
+        with paddle.no_grad():
             # vector
-            emb1 = get_timestep_embedding(torch.FloatTensor([original_height, original_width]).unsqueeze(0), 256)
-            emb2 = get_timestep_embedding(torch.FloatTensor([crop_top, crop_left]).unsqueeze(0), 256)
-            emb3 = get_timestep_embedding(torch.FloatTensor([target_height, target_width]).unsqueeze(0), 256)
+            emb1 = get_timestep_embedding(paddle.Tensor([original_height, original_width]).unsqueeze(0), 256)
+            emb2 = get_timestep_embedding(paddle.Tensor([crop_top, crop_left]).unsqueeze(0), 256)
+            emb3 = get_timestep_embedding(paddle.Tensor([target_height, target_width]).unsqueeze(0), 256)
             # print("emb1", emb1.shape)
             c_vector = torch.cat([emb1, emb2, emb3], dim=1).to(DEVICE, dtype=DTYPE)
             uc_vector = c_vector.clone().to(DEVICE, dtype=DTYPE)  # ちょっとここ正しいかどうかわからない I'm not sure if this is right
@@ -197,17 +197,17 @@ if __name__ == "__main__":
                 return_length=True,
                 return_overflowing_tokens=False,
                 padding="max_length",
-                return_tensors="pt",
+                return_tensors="pd",
             )
             tokens = batch_encoding["input_ids"].to(DEVICE)
 
-            with torch.no_grad():
+            with paddle.no_grad():
                 enc_out = text_model1(tokens, output_hidden_states=True, return_dict=True)
                 text_embedding1 = enc_out["hidden_states"][11]
                 # text_embedding = pipe.text_encoder.text_model.final_layer_norm(text_embedding)    # layer normは通さないらしい
 
             # text encoder 2
-            with torch.no_grad():
+            with paddle.no_grad():
                 tokens = tokenizer2(text2).to(DEVICE)
 
                 enc_out = text_model2(tokens, output_hidden_states=True, return_dict=True)
@@ -240,7 +240,7 @@ if __name__ == "__main__":
             torch.cuda.manual_seed_all(seed)
 
             # # random generator for initial noise
-            # generator = torch.Generator(device="cuda").manual_seed(seed)
+            # generator = paddle.Generator(device="cuda").manual_seed(seed)
             generator = None
         else:
             generator = None
@@ -253,7 +253,7 @@ if __name__ == "__main__":
             latents_shape,
             generator=generator,
             device="cpu",
-            dtype=torch.float32,
+            dtype=paddle.float32,
         ).to(DEVICE, dtype=DTYPE)
 
         # scale the initial noise by the standard deviation required by the scheduler
@@ -266,7 +266,7 @@ if __name__ == "__main__":
         # Copy from ppdiffusers
         timesteps = scheduler.timesteps.to(DEVICE)  # .to(DTYPE)
         num_latent_input = 2
-        with torch.no_grad():
+        with paddle.no_grad():
             for i, t in enumerate(tqdm(timesteps)):
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = latents.repeat((num_latent_input, 1, 1, 1))
@@ -288,7 +288,7 @@ if __name__ == "__main__":
             image = (image / 2 + 0.5).clamp(0, 1)
 
         # we always cast to float32 as this does not cause significant overhead and is compatible with bfloa16
-        image = image.cpu().permute(0, 2, 3, 1).float().numpy()
+        image = image.cpu().transpose([0, 2, 3, 1]).float().numpy()
 
         # image = self.numpy_to_pil(image)
         image = (image * 255).round().astype("uint8")

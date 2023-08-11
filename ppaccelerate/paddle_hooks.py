@@ -102,7 +102,7 @@ def warn_if_has_hooks(tensor):
 
 class BackwardHook:
     """
-    A wrapper class to implement nn.Module backward hooks.
+    A wrapper class to implement nn.Layer backward hooks.
     It handles:
       - Ignoring non-Tensor inputs and replacing them by None before calling the user hook
       - Generating the proper Node to capture a set of Tensor's gradients
@@ -138,7 +138,7 @@ class BackwardHook:
     def _set_user_hook(self, grad_fn):
         def hook(grad_input, _):
             if self.grad_outputs is None:
-                # This happens because the gradient in your nn.Module flows to
+                # This happens because the gradient in your nn.Layer flows to
                 # the Module's input without " passing through the Module's
                 # output, e.g. when you're doing double backward.
                 return

@@ -31,14 +31,14 @@ def merge(args):
     if args.precision == "fp16":
         dtype = torch.float16
     elif args.precision == "bf16":
-        dtype = torch.bfloat16
+        dtype = paddle.bfloat16
     else:
         dtype = torch.float
 
     if args.saving_precision == "fp16":
         save_dtype = torch.float16
     elif args.saving_precision == "bf16":
-        save_dtype = torch.bfloat16
+        save_dtype = paddle.bfloat16
     else:
         save_dtype = torch.float
 

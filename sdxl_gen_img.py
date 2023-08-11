@@ -177,9 +177,9 @@ def replace_vae_attn_to_xformers():
             lambda t: rearrange(t, "b n (h d) -> b h n d", h=self.heads), (query_proj, key_proj, value_proj)
         )
 
-        query_proj = query_proj.contiguous()
-        key_proj = key_proj.contiguous()
-        value_proj = value_proj.contiguous()
+        query_proj = query_proj
+        key_proj = key_proj
+        value_proj = value_proj
         out = xformers.ops.memory_efficient_attention(query_proj, key_proj, value_proj, attn_bias=None)
 
         out = rearrange(out, "b h n d -> b n (h d)")
@@ -360,13 +360,13 @@ class PipelineLike:
     def set_control_nets(self, ctrl_nets):
         self.control_nets = ctrl_nets
 
-    @torch.no_grad()
+    @paddle.no_grad()
     def __call__(
         self,
         prompt: Union[str, List[str]],
         negative_prompt: Optional[Union[str, List[str]]] = None,
-        init_image: Union[torch.FloatTensor, PIL.Image.Image, List[PIL.Image.Image]] = None,
-        mask_image: Union[torch.FloatTensor, PIL.Image.Image, List[PIL.Image.Image]] = None,
+        init_image: Union[paddle.Tensor, PIL.Image.Image, List[PIL.Image.Image]] = None,
+        mask_image: Union[paddle.Tensor, PIL.Image.Image, List[PIL.Image.Image]] = None,
         height: int = 1024,
         width: int = 1024,
         original_height: int = None,
@@ -379,14 +379,14 @@ class PipelineLike:
         strength: float = 0.8,
         # num_images_per_prompt: Optional[int] = 1,
         eta: float = 0.0,
-        generator: Optional[torch.Generator] = None,
-        latents: Optional[torch.FloatTensor] = None,
+        generator: Optional[paddle.Generator] = None,
+        latents: Optional[paddle.Tensor] = None,
         max_embeddings_multiples: Optional[int] = 3,
         output_type: Optional[str] = "pil",
         vae_batch_size: float = None,
         return_latents: bool = False,
         # return_dict: bool = True,
-        callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
+        callback: Optional[Callable[[int, int, paddle.Tensor], None]] = None,
         is_cancelled_callback: Optional[Callable[[], bool]] = None,
         callback_steps: Optional[int] = 1,
         img2img_noise=None,
@@ -509,9 +509,9 @@ class PipelineLike:
             crop_top = 0
         if crop_left is None:
             crop_left = 0
-        emb1 = sdxl_train_util.get_timestep_embedding(torch.FloatTensor([original_height, original_width]).unsqueeze(0), 256)
-        emb2 = sdxl_train_util.get_timestep_embedding(torch.FloatTensor([crop_top, crop_left]).unsqueeze(0), 256)
-        emb3 = sdxl_train_util.get_timestep_embedding(torch.FloatTensor([height, width]).unsqueeze(0), 256)
+        emb1 = sdxl_train_util.get_timestep_embedding(paddle.Tensor([original_height, original_width]).unsqueeze(0), 256)
+        emb2 = sdxl_train_util.get_timestep_embedding(paddle.Tensor([crop_top, crop_left]).unsqueeze(0), 256)
+        emb3 = sdxl_train_util.get_timestep_embedding(paddle.Tensor([height, width]).unsqueeze(0), 256)
         c_vector = torch.cat([emb1, emb2, emb3], dim=1).to(self.device, dtype=text_embeddings.dtype).repeat(batch_size, 1)
         uc_vector = c_vector.clone().to(self.device, dtype=text_embeddings.dtype)
 
@@ -726,7 +726,7 @@ class PipelineLike:
         image = (image / 2 + 0.5).clamp(0, 1)
 
         # we always cast to float32 as this does not cause significant overhead and is compatible with bfloa16
-        image = image.cpu().permute(0, 2, 3, 1).float().numpy()
+        image = image.cpu().transpose([0, 2, 3, 1]).float().numpy()
 
         if output_type == "pil":
             # image = self.numpy_to_pil(image)
@@ -1050,7 +1050,7 @@ def get_weighted_text_embeddings(
         no_boseos_middle=no_boseos_middle,
         chunk_length=tokenizer.model_max_length,
     )
-    prompt_tokens = torch.tensor(prompt_tokens, dtype=torch.long, device=device)
+    prompt_tokens = torch.tensor(prompt_tokens, dtype=paddle.int64, device=device)
     if uncond_prompt is not None:
         uncond_tokens, uncond_weights = pad_tokens_and_weights(
             uncond_tokens,
@@ -1062,7 +1062,7 @@ def get_weighted_text_embeddings(
             no_boseos_middle=no_boseos_middle,
             chunk_length=tokenizer.model_max_length,
         )
-        uncond_tokens = torch.tensor(uncond_tokens, dtype=torch.long, device=device)
+        uncond_tokens = torch.tensor(uncond_tokens, dtype=paddle.int64, device=device)
 
     # get the embeddings
     text_embeddings, text_pool = get_unweighted_text_embeddings(
@@ -1280,9 +1280,9 @@ def main(args):
     if args.fp16:
         dtype = torch.float16
     elif args.bf16:
-        dtype = torch.bfloat16
+        dtype = paddle.bfloat16
     else:
-        dtype = torch.float32
+        dtype = paddle.float32
 
     highres_fix = args.highres_fix_scale is not None
     # assert not highres_fix or args.image_path is None, f"highres_fix doesn't work with img2img / highres_fixはimg2imgと同時に使えません"
@@ -1429,7 +1429,7 @@ def main(args):
     vae_dtype = dtype
     if args.no_half_vae:
         print("set vae_dtype to float32")
-        vae_dtype = torch.float32
+        vae_dtype = paddle.float32
     vae.to(vae_dtype).to(device)
 
     text_encoder1.to(dtype).to(device)
@@ -1848,7 +1848,7 @@ def main(args):
                 elif args.highres_fix_latents_upscaling:
                     # latentを拡大する
                     org_dtype = images_1st.dtype
-                    if images_1st.dtype == torch.bfloat16:
+                    if images_1st.dtype == paddle.bfloat16:
                         images_1st = images_1st.to(torch.float)  # interpolateがbf16をサポートしていない
                     images_1st = torch.nn.functional.interpolate(
                         images_1st, (batch[0].ext.height // 8, batch[0].ext.width // 8), mode="bilinear"

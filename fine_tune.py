@@ -125,7 +125,7 @@ def train(args):
         # Recursively walk through all the children.
         # Any children which exposes the set_use_memory_efficient_attention_xformers method
         # gets the message
-        def fn_recursive_set_mem_eff(module: torch.nn.Module):
+        def fn_recursive_set_mem_eff(module: paddle.nn.Layer):
             if hasattr(module, "set_use_memory_efficient_attention_xformers"):
                 module.set_use_memory_efficient_attention_xformers(valid)
 
@@ -149,7 +149,7 @@ def train(args):
         vae.to(accelerator.device, dtype=weight_dtype)
         vae.requires_grad_(False)
         vae.eval()
-        with torch.no_grad():
+        with paddle.no_grad():
             train_dataset_group.cache_latents(vae, args.vae_batch_size, args.cache_latents_to_disk, accelerator.is_main_process)
         vae.to("cpu")
         if torch.cuda.is_available():
@@ -292,7 +292,7 @@ def train(args):
         for step, batch in enumerate(train_dataloader):
             current_step.value = global_step
             with accelerator.accumulate(training_models[0]):  # 複数モデルに対応していない模様だがとりあえずこうしておく
-                with torch.no_grad():
+                with paddle.no_grad():
                     if "latents" in batch and batch["latents"] is not None:
                         latents = batch["latents"].to(accelerator.device)  # .to(dtype=weight_dtype)
                     else:

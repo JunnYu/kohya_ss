@@ -3,9 +3,9 @@
 
 import math
 import os
-import torch
-import diffusers
-from paddlenlp.transformers import CLIPTextModel, CLIPTokenizer, CLIPTextConfig, logging
+import paddle
+import ppdiffusers
+from paddlenlp.transformers import CLIPTextModel, CLIPTokenizer, CLIPTextConfig
 from ppdiffusers import AutoencoderKL, DDIMScheduler, StableDiffusionPipeline  # , UNet2DConditionModel
 from safetensors.torch import load_file, save_file
 from library.original_unet import UNet2DConditionModel
@@ -128,7 +128,7 @@ def renew_vae_attention_paths(old_list, n_shave_prefix_segments=0):
         new_item = new_item.replace("norm.weight", "group_norm.weight")
         new_item = new_item.replace("norm.bias", "group_norm.bias")
 
-        if diffusers.__version__ < "0.17.0":
+        if ppdiffusers.__version__ < "0.17.0":
             new_item = new_item.replace("q.weight", "query.weight")
             new_item = new_item.replace("q.bias", "query.bias")
 
@@ -207,7 +207,7 @@ def assign_to_checkpoint(
 
         # proj_attn.weight has to be converted from conv 1D to linear
         reshaping = False
-        if diffusers.__version__ < "0.17.0":
+        if ppdiffusers.__version__ < "0.17.0":
             if "proj_attn.weight" in new_path:
                 reshaping = True
         else:
@@ -566,7 +566,7 @@ def convert_ldm_clip_checkpoint_v1(checkpoint):
 
     # support checkpoint without position_ids (invalid checkpoint)
     if "text_model.embeddings.position_ids" not in text_model_dict:
-        text_model_dict["text_model.embeddings.position_ids"] = torch.arange(77).unsqueeze(0)  # 77 is the max length of the text
+        text_model_dict["text_model.embeddings.position_ids"] = paddle.arange(77).unsqueeze(0)  # 77 is the max length of the text
 
     return text_model_dict
 
@@ -624,7 +624,7 @@ def convert_ldm_clip_checkpoint_v2(checkpoint, max_length):
             continue
         if ".resblocks" in key and ".attn.in_proj_" in key:
             # 三つに分割
-            values = torch.chunk(checkpoint[key], 3)
+            values = paddle.chunk(checkpoint[key], 3)
 
             key_suffix = ".weight" if "weight" in key else ".bias"
             key_pfx = key.replace("cond_stage_model.model.transformer.resblocks.", "text_model.encoder.layers.")
@@ -642,7 +642,7 @@ def convert_ldm_clip_checkpoint_v2(checkpoint, max_length):
         position_ids = new_sd[ANOTHER_POSITION_IDS_KEY]
         del new_sd[ANOTHER_POSITION_IDS_KEY]
     else:
-        position_ids = torch.Tensor([list(range(max_length))]).to(torch.int64)
+        position_ids = paddle.to_tensor([list(range(max_length))]).to(paddle.int64)
 
     new_sd["text_model.embeddings.position_ids"] = position_ids
     return new_sd
@@ -906,7 +906,7 @@ def convert_vae_state_dict(vae_state_dict):
         sd_mid_res_prefix = f"mid.block_{i+1}."
         vae_conversion_map.append((sd_mid_res_prefix, hf_mid_res_prefix))
 
-    if diffusers.__version__ < "0.17.0":
+    if ppdiffusers.__version__ < "0.17.0":
         vae_conversion_map_attn = [
             # (stable-diffusion, HF Diffusers)
             ("norm.", "group_norm."),
@@ -967,7 +967,7 @@ def load_checkpoint_with_text_encoder_conversion(ckpt_path, device="cpu"):
         checkpoint = None
         state_dict = load_file(ckpt_path)  # , device) # may causes error
     else:
-        checkpoint = torch.load(ckpt_path, map_location=device)
+        checkpoint = paddle.load(ckpt_path, map_location=device)
         if "state_dict" in checkpoint:
             state_dict = checkpoint["state_dict"]
         else:
@@ -1029,7 +1029,7 @@ def load_models_from_stable_diffusion_checkpoint(v2, ckpt_path, device="cpu", dt
             eos_token_id=2,
             model_type="clip_text_model",
             projection_dim=512,
-            torch_dtype="float32",
+            paddle_dtype="float32",
             transformers_version="4.25.0.dev0",
         )
         text_model = CLIPTextModel._from_config(cfg)
@@ -1059,7 +1059,7 @@ def load_models_from_stable_diffusion_checkpoint(v2, ckpt_path, device="cpu", dt
             eos_token_id=2,
             model_type="clip_text_model",
             projection_dim=768,
-            torch_dtype="float32",
+            paddle_dtype="float32",
         )
         text_model = CLIPTextModel._from_config(cfg)
         info = text_model.load_state_dict(converted_text_encoder_checkpoint)
@@ -1130,7 +1130,7 @@ def convert_text_encoder_state_dict_to_sd_v2(checkpoint, make_dummy_weights=Fals
             value_q = checkpoint[key_q]
             value_k = checkpoint[key_k]
             value_v = checkpoint[key_v]
-            value = torch.cat([value_q, value_k, value_v])
+            value = paddle.cat([value_q, value_k, value_v])
 
             new_key = key.replace("text_model.encoder.layers.", "transformer.resblocks.")
             new_key = new_key.replace(".self_attn.q_proj.", ".attn.in_proj_")
@@ -1145,8 +1145,8 @@ def convert_text_encoder_state_dict_to_sd_v2(checkpoint, make_dummy_weights=Fals
                 new_sd[key.replace(".22.", ".23.")] = new_sd[key].clone()  # copyしないとsafetensorsの保存で落ちる
 
         # Diffusersに含まれない重みを作っておく
-        new_sd["text_projection"] = torch.ones((1024, 1024), dtype=new_sd[keys[0]].dtype, device=new_sd[keys[0]].device)
-        new_sd["logit_scale"] = torch.tensor(1)
+        new_sd["text_projection"] = paddle.ones((1024, 1024), dtype=new_sd[keys[0]].dtype, )
+        new_sd["logit_scale"] = paddle.to_tensor(1)
 
     return new_sd
 
@@ -1217,7 +1217,7 @@ def save_stable_diffusion_checkpoint(
         # TODO Tensor以外のdictの値を削除したほうがいいか
         save_file(state_dict, output_file, metadata)
     else:
-        torch.save(new_ckpt, output_file)
+        paddle.save(new_ckpt, output_file)
 
     return key_count
 
@@ -1256,11 +1256,12 @@ def load_vae(vae_id, dtype):
     if os.path.isdir(vae_id) or not os.path.isfile(vae_id):
         # Diffusers local/remote
         try:
-            vae = AutoencoderKL.from_pretrained(vae_id, subfolder=None, torch_dtype=dtype)
+            vae = AutoencoderKL.from_pretrained(vae_id, subfolder=None, paddle_dtype=dtype)
         except EnvironmentError as e:
             print(f"exception occurs in loading vae: {e}")
             print("retry with subfolder='vae'")
-            vae = AutoencoderKL.from_pretrained(vae_id, subfolder="vae", torch_dtype=dtype)
+            vae = AutoencoderKL.from_pretrained(vae_id, subfolder="vae",         except EnvironmentError as e:
+=dtype)
         return vae
 
     # local
@@ -1268,10 +1269,10 @@ def load_vae(vae_id, dtype):
 
     if vae_id.endswith(".bin"):
         # SD 1.5 VAE on Huggingface
-        converted_vae_checkpoint = torch.load(vae_id, map_location="cpu")
+        converted_vae_checkpoint = paddle.load(vae_id, map_location="cpu")
     else:
         # StableDiffusion
-        vae_model = load_file(vae_id, "cpu") if is_safetensors(vae_id) else torch.load(vae_id, map_location="cpu")
+        vae_model = load_file(vae_id, "cpu") if is_safetensors(vae_id) else paddle.load(vae_id, map_location="cpu")
         vae_sd = vae_model["state_dict"] if "state_dict" in vae_model else vae_model
 
         # vae only or full model

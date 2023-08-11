@@ -1,16 +1,13 @@
-import torch
-import torch.nn.functional as F
+import paddle
+import paddle.nn.functional as F
 from ppdiffusers.models.attention_processor import (
     Attention,
-    AttnProcessor2_0,
+    AttnProcessor2_5,
     SlicedAttnProcessor,
     XFormersAttnProcessor
 )
 
-try:
-    import xformers.ops
-except:
-    xformers = None
+xformers = None
 
 
 loaded_networks = []
@@ -39,9 +36,9 @@ def apply_hypernetworks(context_k, context_v, layer=None):
 def xformers_forward(
     self: XFormersAttnProcessor,
     attn: Attention,
-    hidden_states: torch.Tensor,
-    encoder_hidden_states: torch.Tensor = None,
-    attention_mask: torch.Tensor = None,
+    hidden_states: paddle.Tensor,
+    encoder_hidden_states: paddle.Tensor = None,
+    attention_mask: paddle.Tensor = None,
 ):
     batch_size, sequence_length, _ = (
         hidden_states.shape
@@ -65,20 +62,22 @@ def xformers_forward(
     key = attn.to_k(context_k)
     value = attn.to_v(context_v)
 
-    query = attn.head_to_batch_dim(query).contiguous()
-    key = attn.head_to_batch_dim(key).contiguous()
-    value = attn.head_to_batch_dim(value).contiguous()
+    query = attn.head_to_batch_dim(query, transpose=False)
+    key = attn.head_to_batch_dim(key, transpose=False)
+    value = attn.head_to_batch_dim(value, transpose=False)
 
-    hidden_states = xformers.ops.memory_efficient_attention(
+    hidden_states = F.scaled_dot_product_attention_(
         query,
         key,
         value,
-        attn_bias=attention_mask,
-        op=self.attention_op,
+        attn_mask=attention_mask,
         scale=attn.scale,
-    )
+        dropout_p=0.0,
+        training=attn.training,
+        attention_op=self.attention_op, )
+
     hidden_states = hidden_states.to(query.dtype)
-    hidden_states = attn.batch_to_head_dim(hidden_states)
+    hidden_states = attn.batch_to_head_dim(hidden_states, transpose=False)
 
     # linear proj
     hidden_states = attn.to_out[0](hidden_states)
@@ -90,9 +89,9 @@ def xformers_forward(
 def sliced_attn_forward(
     self: SlicedAttnProcessor,
     attn: Attention,
-    hidden_states: torch.Tensor,
-    encoder_hidden_states: torch.Tensor = None,
-    attention_mask: torch.Tensor = None,
+    hidden_states: paddle.Tensor,
+    encoder_hidden_states: paddle.Tensor = None,
+    attention_mask: paddle.Tensor = None,
 ):
     batch_size, sequence_length, _ = (
         hidden_states.shape
@@ -119,12 +118,14 @@ def sliced_attn_forward(
     key = attn.head_to_batch_dim(key)
     value = attn.head_to_batch_dim(value)
 
-    batch_size_attention, query_tokens, _ = query.shape
-    hidden_states = torch.zeros(
-        (batch_size_attention, query_tokens, dim // attn.heads),
-        device=query.device,
-        dtype=query.dtype,
-    )
+    query = query.flatten(0, 1)
+    key = key.flatten(0, 1)
+    value = value.flatten(0, 1)
+        
+    batch_size_attention = query.shape[0]
+    query_len = query.shape[1]
+    hidden_states = paddle.zeros(
+        (batch_size_attention, query_len, attn.head_dim), dtype=query.dtype)
 
     for i in range(batch_size_attention // self.slice_size):
         start_idx = i * self.slice_size
@@ -132,15 +133,19 @@ def sliced_attn_forward(
 
         query_slice = query[start_idx:end_idx]
         key_slice = key[start_idx:end_idx]
-        attn_mask_slice = (
-            attention_mask[start_idx:end_idx] if attention_mask is not None else None
-        )
+        attn_mask_slice = attention_mask[
+            start_idx:end_idx] if attention_mask is not None else None
 
-        attn_slice = attn.get_attention_scores(query_slice, key_slice, attn_mask_slice)
+        attn_slice = attn.get_attention_scores(query_slice, key_slice,
+                                                attn_mask_slice)
 
-        attn_slice = torch.bmm(attn_slice, value[start_idx:end_idx])
+        attn_slice = paddle.matmul(attn_slice, value[start_idx:end_idx])
 
         hidden_states[start_idx:end_idx] = attn_slice
+
+    # reshape back to [bs, num_heads, seqlen, head_dim]
+    hidden_states = hidden_states.reshape(
+        [-1, attn.heads, query_len, attn.head_dim])
 
     hidden_states = attn.batch_to_head_dim(hidden_states)
 
@@ -152,8 +157,8 @@ def sliced_attn_forward(
     return hidden_states
 
 
-def v2_0_forward(
-    self: AttnProcessor2_0,
+def v2_5_forward(
+    self: AttnProcessor2_5,
     attn: Attention,
     hidden_states,
     encoder_hidden_states=None,
@@ -164,7 +169,6 @@ def v2_0_forward(
         if encoder_hidden_states is None
         else encoder_hidden_states.shape
     )
-    inner_dim = hidden_states.shape[-1]
 
     if attention_mask is not None:
         attention_mask = attn.prepare_attention_mask(
@@ -188,21 +192,22 @@ def v2_0_forward(
     key = attn.to_k(context_k)
     value = attn.to_v(context_v)
 
-    head_dim = inner_dim // attn.heads
-    query = query.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
-    key = key.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
-    value = value.view(batch_size, -1, attn.heads, head_dim).transpose(1, 2)
+    query = attn.head_to_batch_dim(query, transpose=False)
+    key = attn.head_to_batch_dim(key, transpose=False)
+    value = attn.head_to_batch_dim(value, transpose=False)
 
-    # the output of sdp = (batch, num_heads, seq_len, head_dim)
-    # TODO: add support for attn.scale when we move to Torch 2.1
-    hidden_states = F.scaled_dot_product_attention(
-        query, key, value, attn_mask=attention_mask, dropout_p=0.0, is_causal=False
-    )
+    hidden_states = F.scaled_dot_product_attention_(
+        query,
+        key,
+        value,
+        attn_mask=attention_mask,
+        scale=attn.scale,
+        dropout_p=0.0,
+        training=attn.training,
+        attention_op=self.attention_op, )
 
-    hidden_states = hidden_states.transpose(1, 2).reshape(
-        batch_size, -1, attn.heads * head_dim
-    )
     hidden_states = hidden_states.to(query.dtype)
+    hidden_states = attn.batch_to_head_dim(hidden_states, transpose=False)
 
     # linear proj
     hidden_states = attn.to_out[0](hidden_states)
@@ -212,12 +217,12 @@ def v2_0_forward(
 
 
 def replace_attentions_for_hypernetwork():
-    import diffusers.models.attention_processor
+    import ppdiffusers.models.attention_processor
 
-    diffusers.models.attention_processor.XFormersAttnProcessor.__call__ = (
+    ppdiffusers.models.attention_processor.XFormersAttnProcessor.__call__ = (
         xformers_forward
     )
-    diffusers.models.attention_processor.SlicedAttnProcessor.__call__ = (
+    ppdiffusers.models.attention_processor.SlicedAttnProcessor.__call__ = (
         sliced_attn_forward
     )
-    diffusers.models.attention_processor.AttnProcessor2_0.__call__ = v2_0_forward
+    ppdiffusers.models.attention_processor.AttnProcessor2_5.__call__ = v2_5_forward

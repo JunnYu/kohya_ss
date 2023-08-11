@@ -7,7 +7,7 @@ from library.original_unet import SampleOutput
 
 def unet_forward_XTI(
     self,
-    sample: torch.FloatTensor,
+    sample: paddle.Tensor,
     timestep: Union[torch.Tensor, float, int],
     encoder_hidden_states: torch.Tensor,
     class_labels: Optional[torch.Tensor] = None,
@@ -15,9 +15,9 @@ def unet_forward_XTI(
 ) -> Union[Dict, Tuple]:
     r"""
     Args:
-        sample (`torch.FloatTensor`): (batch, channel, height, width) noisy inputs tensor
-        timestep (`torch.FloatTensor` or `float` or `int`): (batch) timesteps
-        encoder_hidden_states (`torch.FloatTensor`): (batch, sequence_length, feature_dim) encoder hidden states
+        sample (`paddle.Tensor`): (batch, channel, height, width) noisy inputs tensor
+        timestep (`paddle.Tensor` or `float` or `int`): (batch) timesteps
+        encoder_hidden_states (`paddle.Tensor`): (batch, sequence_length, feature_dim) encoder hidden states
         return_dict (`bool`, *optional*, defaults to `True`):
             Whether or not to return a dict instead of a plain tuple.
 
@@ -138,8 +138,8 @@ def downblock_forward_XTI(
 
                 return custom_forward
 
-            hidden_states = torch.utils.checkpoint.checkpoint(create_custom_forward(resnet), hidden_states, temb)
-            hidden_states = torch.utils.checkpoint.checkpoint(
+            hidden_states = paddle.distributed.fleet.utils.recompute(create_custom_forward(resnet), hidden_states, temb)
+            hidden_states = paddle.distributed.fleet.utils.recompute(
                 create_custom_forward(attn, return_dict=False), hidden_states, encoder_hidden_states[i]
             )[0]
         else:
@@ -184,8 +184,8 @@ def upblock_forward_XTI(
 
                 return custom_forward
 
-            hidden_states = torch.utils.checkpoint.checkpoint(create_custom_forward(resnet), hidden_states, temb)
-            hidden_states = torch.utils.checkpoint.checkpoint(
+            hidden_states = paddle.distributed.fleet.utils.recompute(create_custom_forward(resnet), hidden_states, temb)
+            hidden_states = paddle.distributed.fleet.utils.recompute(
                 create_custom_forward(attn, return_dict=False), hidden_states, encoder_hidden_states[i]
             )[0]
         else:

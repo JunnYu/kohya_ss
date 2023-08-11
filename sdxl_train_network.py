@@ -70,8 +70,8 @@ class SdxlNetworkTrainer(train_network.NetworkTrainer):
                 accelerator.is_main_process,
             )
 
-            text_encoders[0].to("cpu", dtype=torch.float32)  # Text Encoder doesn't work with fp16 on CPU
-            text_encoders[1].to("cpu", dtype=torch.float32)
+            text_encoders[0].to("cpu", dtype=paddle.float32)  # Text Encoder doesn't work with fp16 on CPU
+            text_encoders[1].to("cpu", dtype=paddle.float32)
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 

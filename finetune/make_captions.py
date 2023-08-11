@@ -9,14 +9,12 @@ from pathlib import Path
 from PIL import Image
 from tqdm import tqdm
 import numpy as np
-import torch
-from torchvision import transforms
-from torchvision.transforms.functional import InterpolationMode
-sys.path.append(os.path.dirname(__file__))
-from blip.blip import blip_decoder
+import paddle
+from paddle.vision import transforms
+# from paddle.vision.transforms.functional import InterpolationMode
+# from blip.blip import blip_decoder
 import library.train_util as train_util
-
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+from .clip_interrogator.blip_decoder import BLIP_Decoder
 
 
 IMAGE_SIZE = 384
@@ -24,7 +22,7 @@ IMAGE_SIZE = 384
 # 正方形でいいのか？　という気がするがソースがそうなので
 IMAGE_TRANSFORM = transforms.Compose(
     [
-        transforms.Resize((IMAGE_SIZE, IMAGE_SIZE), interpolation=InterpolationMode.BICUBIC),
+        transforms.Resize((IMAGE_SIZE, IMAGE_SIZE), interpolation='bicubic'),
         transforms.ToTensor(),
         transforms.Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
     ]
@@ -32,7 +30,7 @@ IMAGE_TRANSFORM = transforms.Compose(
 
 
 # 共通化したいが微妙に処理が異なる……
-class ImageLoadingTransformDataset(torch.utils.data.Dataset):
+class ImageLoadingTransformDataset(paddle.io.Dataset):
     def __init__(self, image_paths):
         self.images = image_paths
 
@@ -66,7 +64,7 @@ def collate_fn_remove_corrupted(batch):
 def main(args):
     # fix the seed for reproducibility
     seed = args.seed  # + utils.get_rank()
-    torch.manual_seed(seed)
+    paddle.seed(seed)
     np.random.seed(seed)
     random.seed(seed)
 
@@ -83,16 +81,17 @@ def main(args):
     print(f"found {len(image_paths)} images.")
 
     print(f"loading BLIP caption: {args.caption_weights}")
-    model = blip_decoder(pretrained=args.caption_weights, image_size=IMAGE_SIZE, vit="large", med_config="./blip/med_config.json")
+    # model = blip_decoder(pretrained=args.caption_weights, image_size=IMAGE_SIZE, vit="large", med_config="./blip/med_config.json")
+    model = BLIP_Decoder(args.caption_weights)
     model.eval()
-    model = model.to(DEVICE)
+    # model = model.to(DEVICE)
     print("BLIP loaded")
 
     # captioningする
     def run_batch(path_imgs):
-        imgs = torch.stack([im for _, im in path_imgs]).to(DEVICE)
+        imgs = paddle.stack([im for _, im in path_imgs])
 
-        with torch.no_grad():
+        with paddle.no_grad():
             if args.beam_search:
                 captions = model.generate(
                     imgs, sample=False, num_beams=args.num_beams, max_length=args.max_length, min_length=args.min_length
@@ -111,7 +110,7 @@ def main(args):
     # 読み込みの高速化のためにDataLoaderを使うオプション
     if args.max_data_loader_n_workers is not None:
         dataset = ImageLoadingTransformDataset(image_paths)
-        data = torch.utils.data.DataLoader(
+        data = paddle.io.DataLoader(
             dataset,
             batch_size=args.batch_size,
             shuffle=False,
@@ -148,14 +147,18 @@ def main(args):
 
     print("done!")
 
-
+BLIP_PRETRAINED_MODEL_ARCHIVE_LIST = [
+    "Salesforce/blip-image-captioning-base",
+    "Salesforce/blip-image-captioning-large",
+]
 def setup_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("train_data_dir", type=str, help="directory for train images / 学習画像データのディレクトリ")
     parser.add_argument(
         "--caption_weights",
         type=str,
-        default="https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_large_caption.pth",
+        default=BLIP_PRETRAINED_MODEL_ARCHIVE_LIST[0],
+        choices=BLIP_PRETRAINED_MODEL_ARCHIVE_LIST,
         help="BLIP caption weights (model_large_caption.pth) / BLIP captionの重みファイル(model_large_caption.pth)",
     )
     parser.add_argument(

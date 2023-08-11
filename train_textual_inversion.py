@@ -177,7 +177,7 @@ class TextualInversionTrainer:
 
         # mixed precisionに対応した型を用意しておき適宜castする
         weight_dtype, save_dtype = train_util.prepare_dtype(args)
-        vae_dtype = torch.float32 if args.no_half_vae else weight_dtype
+        vae_dtype = paddle.float32 if args.no_half_vae else weight_dtype
 
         # モデルを読み込む
         model_version, text_encoder_or_list, vae, unet = self.load_target_model(args, weight_dtype, accelerator)
@@ -354,7 +354,7 @@ class TextualInversionTrainer:
             vae.to(accelerator.device, dtype=vae_dtype)
             vae.requires_grad_(False)
             vae.eval()
-            with torch.no_grad():
+            with paddle.no_grad():
                 train_dataset_group.cache_latents(vae, args.vae_batch_size, args.cache_latents_to_disk, accelerator.is_main_process)
             vae.to("cpu")
             if torch.cuda.is_available():
@@ -534,7 +534,7 @@ class TextualInversionTrainer:
             for step, batch in enumerate(train_dataloader):
                 current_step.value = global_step
                 with accelerator.accumulate(text_encoders[0]):
-                    with torch.no_grad():
+                    with paddle.no_grad():
                         if "latents" in batch and batch["latents"] is not None:
                             latents = batch["latents"].to(accelerator.device)
                         else:
@@ -588,7 +588,7 @@ class TextualInversionTrainer:
                     optimizer.zero_grad(set_to_none=True)
 
                     # Let's make sure we don't update any embedding weights besides the newly added token
-                    with torch.no_grad():
+                    with paddle.no_grad():
                         for text_encoder, orig_embeds_params, index_no_updates in zip(
                             text_encoders, orig_embeds_params_list, index_no_updates_list
                         ):

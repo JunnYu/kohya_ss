@@ -5,14 +5,14 @@ import re
 from pathlib import Path
 from PIL import Image
 from tqdm import tqdm
-import torch
+import paddle
 from paddlenlp.transformers import AutoProcessor, AutoModelForCausalLM
-from paddlenlp.transformers.generation.utils import GenerationMixin
+from paddlenlp.transformers.generation_utils import GenerationMixin
 
 import library.train_util as train_util
 
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 PATTERN_REPLACE = [
     re.compile(r'(has|with|and) the (words?|letters?|name) (" ?[^"]*"|\w+)( ?(is )?(on|in) (the |her |their |him )?\w+)?'),
@@ -53,18 +53,18 @@ def collate_fn_remove_corrupted(batch):
 
 def main(args):
     # GITにバッチサイズが1より大きくても動くようにパッチを当てる: transformers 4.26.0用
-    org_prepare_input_ids_for_generation = GenerationMixin._prepare_input_ids_for_generation
+    org_prepare_input_ids_for_generation = GenerationMixin.prepare_input_ids_for_generation
     curr_batch_size = [args.batch_size]  # ループの最後で件数がbatch_size未満になるので入れ替えられるように
 
     # input_idsがバッチサイズと同じ件数である必要がある：バッチサイズはこの関数から参照できないので外から渡す
     # ここより上で置き換えようとするとすごく大変
     def _prepare_input_ids_for_generation_patch(self, bos_token_id, encoder_outputs):
         input_ids = org_prepare_input_ids_for_generation(self, bos_token_id, encoder_outputs)
-        if input_ids.size()[0] != curr_batch_size[0]:
-            input_ids = input_ids.repeat(curr_batch_size[0], 1)
+        if input_ids.shape[0] != curr_batch_size[0]:
+            input_ids = input_ids.tile([curr_batch_size[0], 1])
         return input_ids
 
-    GenerationMixin._prepare_input_ids_for_generation = _prepare_input_ids_for_generation_patch
+    GenerationMixin.prepare_input_ids_for_generation = _prepare_input_ids_for_generation_patch
 
     print(f"load images from {args.train_data_dir}")
     train_data_dir_path = Path(args.train_data_dir)
@@ -74,7 +74,7 @@ def main(args):
     # できればcacheに依存せず明示的にダウンロードしたい
     print(f"loading GIT: {args.model_id}")
     git_processor = AutoProcessor.from_pretrained(args.model_id)
-    git_model = AutoModelForCausalLM.from_pretrained(args.model_id).to(DEVICE)
+    git_model = AutoModelForCausalLM.from_pretrained(args.model_id)
     print("GIT loaded")
 
     # captioningする
@@ -82,7 +82,7 @@ def main(args):
         imgs = [im for _, im in path_imgs]
 
         curr_batch_size[0] = len(path_imgs)
-        inputs = git_processor(images=imgs, return_tensors="pt").to(DEVICE)  # 画像はpil形式
+        inputs = git_processor(images=imgs, return_tensors="pd")  # 画像はpil形式
         generated_ids = git_model.generate(pixel_values=inputs.pixel_values, max_length=args.max_length)
         captions = git_processor.batch_decode(generated_ids, skip_special_tokens=True)
 
@@ -98,7 +98,7 @@ def main(args):
     # 読み込みの高速化のためにDataLoaderを使うオプション
     if args.max_data_loader_n_workers is not None:
         dataset = train_util.ImageLoadingDataset(image_paths)
-        data = torch.utils.data.DataLoader(
+        data = paddle.io.DataLoader(
             dataset,
             batch_size=args.batch_size,
             shuffle=False,

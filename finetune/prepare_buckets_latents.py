@@ -8,13 +8,12 @@ from tqdm import tqdm
 import numpy as np
 from PIL import Image
 import cv2
-import torch
-from torchvision import transforms
+import paddle
+from paddle.vision import transforms
 
 import library.model_util as model_util
 import library.train_util as train_util
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 IMAGE_TRANSFORMS = transforms.Compose(
     [
@@ -65,15 +64,15 @@ def main(args):
         print(f"no metadata / メタデータファイルがありません: {args.in_json}")
         return
 
-    weight_dtype = torch.float32
+    weight_dtype = paddle.float32
     if args.mixed_precision == "fp16":
-        weight_dtype = torch.float16
+        weight_dtype = paddle.float16
     elif args.mixed_precision == "bf16":
-        weight_dtype = torch.bfloat16
+        weight_dtype = paddle.bfloat16
 
     vae = model_util.load_vae(args.model_name_or_path, weight_dtype)
     vae.eval()
-    vae.to(DEVICE, dtype=weight_dtype)
+    vae.to(dtype=weight_dtype)
 
     # bucketのサイズを計算する
     max_reso = tuple([int(t) for t in args.max_resolution.split(",")])
@@ -101,7 +100,7 @@ def main(args):
     # 読み込みの高速化のためにDataLoaderを使うオプション
     if args.max_data_loader_n_workers is not None:
         dataset = train_util.ImageLoadingDataset(image_paths)
-        data = torch.utils.data.DataLoader(
+        data = paddle.io.DataLoader(
             dataset,
             batch_size=1,
             shuffle=False,

@@ -1,4 +1,4 @@
-import torch
+import paddle
 import argparse
 import random
 import re
@@ -10,13 +10,13 @@ def prepare_scheduler_for_custom_training(noise_scheduler, device):
         return
 
     alphas_cumprod = noise_scheduler.alphas_cumprod
-    sqrt_alphas_cumprod = torch.sqrt(alphas_cumprod)
-    sqrt_one_minus_alphas_cumprod = torch.sqrt(1.0 - alphas_cumprod)
+    sqrt_alphas_cumprod = paddle.sqrt(alphas_cumprod)
+    sqrt_one_minus_alphas_cumprod = paddle.sqrt(1.0 - alphas_cumprod)
     alpha = sqrt_alphas_cumprod
     sigma = sqrt_one_minus_alphas_cumprod
     all_snr = (alpha / sigma) ** 2
 
-    noise_scheduler.all_snr = all_snr.to(device)
+    noise_scheduler.all_snr = all_snr #.to(device)
 
 
 def fix_noise_scheduler_betas_for_zero_terminal_snr(noise_scheduler):
@@ -40,14 +40,14 @@ def fix_noise_scheduler_betas_for_zero_terminal_snr(noise_scheduler):
         # Convert alphas_bar_sqrt to betas
         alphas_bar = alphas_bar_sqrt**2
         alphas = alphas_bar[1:] / alphas_bar[:-1]
-        alphas = torch.cat([alphas_bar[0:1], alphas])
+        alphas = paddle.concat([alphas_bar[0:1], alphas])
         betas = 1 - alphas
         return betas
 
     betas = noise_scheduler.betas
     betas = enforce_zero_terminal_snr(betas)
     alphas = 1.0 - betas
-    alphas_cumprod = torch.cumprod(alphas, dim=0)
+    alphas_cumprod = paddle.cumprod(alphas, 0)
 
     # print("original:", noise_scheduler.betas)
     # print("fixed:", betas)
@@ -58,9 +58,9 @@ def fix_noise_scheduler_betas_for_zero_terminal_snr(noise_scheduler):
 
 
 def apply_snr_weight(loss, timesteps, noise_scheduler, gamma):
-    snr = torch.stack([noise_scheduler.all_snr[t] for t in timesteps])
-    gamma_over_snr = torch.div(torch.ones_like(snr) * gamma, snr)
-    snr_weight = torch.minimum(gamma_over_snr, torch.ones_like(gamma_over_snr)).float().to(loss.device)  # from paper
+    snr = paddle.stack([noise_scheduler.all_snr[t] for t in timesteps])
+    gamma_over_snr = paddle.divide(paddle.ones_like(snr) * gamma, snr)
+    snr_weight = paddle.minimum(gamma_over_snr, paddle.ones_like(gamma_over_snr)).float()#.to(loss.device)  # from paper
     loss = loss * snr_weight
     return loss
 
@@ -72,8 +72,8 @@ def scale_v_prediction_loss_like_noise_prediction(loss, timesteps, noise_schedul
 
 
 def get_snr_scale(timesteps, noise_scheduler):
-    snr_t = torch.stack([noise_scheduler.all_snr[t] for t in timesteps])  # batch_size
-    snr_t = torch.minimum(snr_t, torch.ones_like(snr_t) * 1000)  # if timestep is 0, snr_t is inf, so limit it to 1000
+    snr_t = paddle.stack([noise_scheduler.all_snr[t] for t in timesteps])  # batch_size
+    snr_t = paddle.minimum(snr_t, paddle.ones_like(snr_t) * 1000)  # if timestep is 0, snr_t is inf, so limit it to 1000
     scale = snr_t / (snr_t + 1)
     # # show debug info
     # print(f"timesteps: {timesteps}, snr_t: {snr_t}, scale: {scale}")
@@ -286,7 +286,7 @@ def pad_tokens_and_weights(tokens, weights, max_length, bos, eos, no_boseos_midd
 def get_unweighted_text_embeddings(
     tokenizer,
     text_encoder,
-    text_input: torch.Tensor,
+    text_input: paddle.Tensor,
     chunk_length: int,
     clip_skip: int,
     eos: int,
@@ -334,7 +334,7 @@ def get_unweighted_text_embeddings(
                     text_embedding = text_embedding[:, 1:-1]
 
             text_embeddings.append(text_embedding)
-        text_embeddings = torch.concat(text_embeddings, axis=1)
+        text_embeddings = paddle.concat(text_embeddings, axis=1)
     else:
         if clip_skip is None or clip_skip == 1:
             text_embeddings = text_encoder(text_input)[0]
@@ -403,7 +403,7 @@ def get_weighted_text_embeddings(
         no_boseos_middle=no_boseos_middle,
         chunk_length=tokenizer.model_max_length,
     )
-    prompt_tokens = torch.tensor(prompt_tokens, dtype=torch.long, device=device)
+    prompt_tokens = paddle.to_tensor(prompt_tokens, dtype=paddle.int64, )
 
     # get the embeddings
     text_embeddings = get_unweighted_text_embeddings(
@@ -416,7 +416,7 @@ def get_weighted_text_embeddings(
         pad,
         no_boseos_middle=no_boseos_middle,
     )
-    prompt_weights = torch.tensor(prompt_weights, dtype=text_embeddings.dtype, device=device)
+    prompt_weights = paddle.to_tensor(prompt_weights, dtype=text_embeddings.dtype)
 
     # assign weights to the prompts and normalize in the sense of mean
     previous_mean = text_embeddings.float().mean(axis=[-2, -1]).to(text_embeddings.dtype)
@@ -428,13 +428,13 @@ def get_weighted_text_embeddings(
 
 
 # https://wandb.ai/johnowhitaker/multires_noise/reports/Multi-Resolution-Noise-for-Diffusion-Model-Training--VmlldzozNjYyOTU2
-def pyramid_noise_like(noise, device, iterations=6, discount=0.4):
+def pyramid_noise_like(noise, iterations=6, discount=0.4):
     b, c, w, h = noise.shape  # EDIT: w and h get over-written, rename for a different variant!
-    u = torch.nn.Upsample(size=(w, h), mode="bilinear").to(device)
+    u = paddle.nn.Upsample(size=(w, h), mode="bilinear")#.to(device)
     for i in range(iterations):
         r = random.random() * 2 + 2  # Rather than always going 2x,
         wn, hn = max(1, int(w / (r**i))), max(1, int(h / (r**i)))
-        noise += u(torch.randn(b, c, wn, hn).to(device)) * discount**i
+        noise += u(paddle.randn([b, c, wn, hn])) * discount**i
         if wn == 1 or hn == 1:
             break  # Lowest resolution is 1x1
     return noise / noise.std()  # Scaled back to roughly unit variance
@@ -447,13 +447,13 @@ def apply_noise_offset(latents, noise, noise_offset, adaptive_noise_scale):
     if adaptive_noise_scale is not None:
         # latent shape: (batch_size, channels, height, width)
         # abs mean value for each channel
-        latent_mean = torch.abs(latents.mean(dim=(2, 3), keepdim=True))
+        latent_mean = paddle.abs(latents.mean(axis=(2, 3), keepdim=True))
 
         # multiply adaptive noise scale to the mean value and add it to the noise offset
         noise_offset = noise_offset + adaptive_noise_scale * latent_mean
-        noise_offset = torch.clamp(noise_offset, 0.0, None)  # in case of adaptive noise scale is negative
+        noise_offset = paddle.clip(noise_offset, 0.0, None)  # in case of adaptive noise scale is negative
 
-    noise = noise + noise_offset * torch.randn((latents.shape[0], latents.shape[1], 1, 1), device=latents.device)
+    noise = noise + noise_offset * paddle.randn((latents.shape[0], latents.shape[1], 1, 1),)
     return noise
 
 

@@ -7,11 +7,11 @@ from typing import Callable, List, Optional, Union
 
 import numpy as np
 import PIL.Image
-import torch
+import paddle
 from packaging import version
 from paddlenlp.transformers import CLIPFeatureExtractor, CLIPTextModel, CLIPTokenizer
 
-import diffusers
+import ppdiffusers
 from ppdiffusers import SchedulerMixin, StableDiffusionPipeline
 from ppdiffusers.models import AutoencoderKL, UNet2DConditionModel
 from ppdiffusers.pipelines.stable_diffusion import StableDiffusionPipelineOutput, StableDiffusionSafetyChecker
@@ -209,7 +209,7 @@ def pad_tokens_and_weights(tokens, weights, max_length, bos, eos, no_boseos_midd
 
 def get_unweighted_text_embeddings(
     pipe: StableDiffusionPipeline,
-    text_input: torch.Tensor,
+    text_input: paddle.Tensor,
     chunk_length: int,
     clip_skip: int,
     eos: int,
@@ -257,7 +257,7 @@ def get_unweighted_text_embeddings(
                     text_embedding = text_embedding[:, 1:-1]
 
             text_embeddings.append(text_embedding)
-        text_embeddings = torch.concat(text_embeddings, axis=1)
+        text_embeddings = paddle.concat(text_embeddings, axis=1)
     else:
         if clip_skip is None or clip_skip == 1:
             text_embeddings = pipe.text_encoder(text_input)[0]
@@ -349,7 +349,7 @@ def get_weighted_text_embeddings(
         no_boseos_middle=no_boseos_middle,
         chunk_length=pipe.tokenizer.model_max_length,
     )
-    prompt_tokens = torch.tensor(prompt_tokens, dtype=torch.long, device=pipe.device)
+    prompt_tokens = paddle.to_tensor(prompt_tokens, dtype=paddle.int64, )
     if uncond_prompt is not None:
         uncond_tokens, uncond_weights = pad_tokens_and_weights(
             uncond_tokens,
@@ -360,7 +360,7 @@ def get_weighted_text_embeddings(
             no_boseos_middle=no_boseos_middle,
             chunk_length=pipe.tokenizer.model_max_length,
         )
-        uncond_tokens = torch.tensor(uncond_tokens, dtype=torch.long, device=pipe.device)
+        uncond_tokens = paddle.to_tensor(uncond_tokens, dtype=paddle.int64, )
 
     # get the embeddings
     text_embeddings = get_unweighted_text_embeddings(
@@ -372,7 +372,7 @@ def get_weighted_text_embeddings(
         pad,
         no_boseos_middle=no_boseos_middle,
     )
-    prompt_weights = torch.tensor(prompt_weights, dtype=text_embeddings.dtype, device=pipe.device)
+    prompt_weights = paddle.to_tensor(prompt_weights, dtype=text_embeddings.dtype, )
     if uncond_prompt is not None:
         uncond_embeddings = get_unweighted_text_embeddings(
             pipe,
@@ -383,7 +383,7 @@ def get_weighted_text_embeddings(
             pad,
             no_boseos_middle=no_boseos_middle,
         )
-        uncond_weights = torch.tensor(uncond_weights, dtype=uncond_embeddings.dtype, device=pipe.device)
+        uncond_weights = paddle.to_tensor(uncond_weights, dtype=uncond_embeddings.dtype, )
 
     # assign weights to the prompts and normalize in the sense of mean
     # TODO: should we normalize by chunk or in a whole (current implementation)?
@@ -409,7 +409,7 @@ def preprocess_image(image):
     image = image.resize((w, h), resample=PIL_INTERPOLATION["lanczos"])
     image = np.array(image).astype(np.float32) / 255.0
     image = image[None].transpose(0, 3, 1, 2)
-    image = torch.from_numpy(image)
+    image = paddle.to_tensor(image)
     return 2.0 * image - 1.0
 
 
@@ -422,7 +422,7 @@ def preprocess_mask(mask, scale_factor=8):
     mask = np.tile(mask, (4, 1, 1))
     mask = mask[None].transpose(0, 1, 2, 3)  # what does this step do?
     mask = 1 - mask  # repaint white, keep black
-    mask = torch.from_numpy(mask)
+    mask = paddle.to_tensor(mask)
     return mask
 
 
@@ -432,12 +432,11 @@ def prepare_controlnet_image(
     height: int,
     batch_size: int,
     num_images_per_prompt: int,
-    device: torch.device,
-    dtype: torch.dtype,
+    dtype: paddle.dtype,
     do_classifier_free_guidance: bool = False,
     guess_mode: bool = False,
 ):
-    if not isinstance(image, torch.Tensor):
+    if not isinstance(image, paddle.Tensor):
         if isinstance(image, PIL.Image.Image):
             image = [image]
 
@@ -456,9 +455,9 @@ def prepare_controlnet_image(
             image = np.concatenate(image, axis=0)
             image = np.array(image).astype(np.float32) / 255.0
             image = image.transpose(0, 3, 1, 2)
-            image = torch.from_numpy(image)
-        elif isinstance(image[0], torch.Tensor):
-            image = torch.cat(image, dim=0)
+            image = paddle.to_tensor(image)
+        elif isinstance(image[0], paddle.Tensor):
+            image = paddle.concat(image, axis=0)
 
     image_batch_size = image.shape[0]
 
@@ -468,12 +467,12 @@ def prepare_controlnet_image(
         # image batch size is the same as prompt batch size
         repeat_by = num_images_per_prompt
 
-    image = image.repeat_interleave(repeat_by, dim=0)
+    image = image.repeat_interleave(repeat_by, axis=0)
 
-    image = image.to(device=device, dtype=dtype)
+    image = image.to(dtype=dtype)
 
     if do_classifier_free_guidance and not guess_mode:
-        image = torch.cat([image] * 2)
+        image = paddle.concat([image] * 2)
 
     return image
 
@@ -561,28 +560,9 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
         if not hasattr(self, "vae_scale_factor"):
             setattr(self, "vae_scale_factor", 2 ** (len(self.vae.config.block_out_channels) - 1))
 
-    @property
-    def _execution_device(self):
-        r"""
-        Returns the device on which the pipeline's models will be executed. After calling
-        `pipeline.enable_sequential_cpu_offload()` the execution device can only be inferred from ppaccelerate's module
-        hooks.
-        """
-        if self.device != torch.device("meta") or not hasattr(self.unet, "_hf_hook"):
-            return self.device
-        for module in self.unet.modules():
-            if (
-                hasattr(module, "_hf_hook")
-                and hasattr(module._hf_hook, "execution_device")
-                and module._hf_hook.execution_device is not None
-            ):
-                return torch.device(module._hf_hook.execution_device)
-        return self.device
-
     def _encode_prompt(
         self,
         prompt,
-        device,
         num_images_per_prompt,
         do_classifier_free_guidance,
         negative_prompt,
@@ -627,14 +607,14 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
             clip_skip=self.clip_skip,
         )
         bs_embed, seq_len, _ = text_embeddings.shape
-        text_embeddings = text_embeddings.repeat(1, num_images_per_prompt, 1)
-        text_embeddings = text_embeddings.view(bs_embed * num_images_per_prompt, seq_len, -1)
+        text_embeddings = text_embeddings.tile([1, num_images_per_prompt, 1])
+        text_embeddings = text_embeddings.reshape([bs_embed * num_images_per_prompt, seq_len, -1])
 
         if do_classifier_free_guidance:
             bs_embed, seq_len, _ = uncond_embeddings.shape
-            uncond_embeddings = uncond_embeddings.repeat(1, num_images_per_prompt, 1)
-            uncond_embeddings = uncond_embeddings.view(bs_embed * num_images_per_prompt, seq_len, -1)
-            text_embeddings = torch.cat([uncond_embeddings, text_embeddings])
+            uncond_embeddings = uncond_embeddings.tile([1, num_images_per_prompt, 1])
+            uncond_embeddings = uncond_embeddings.reshape([bs_embed * num_images_per_prompt, seq_len, -1])
+            text_embeddings = paddle.concat([uncond_embeddings, text_embeddings])
 
         return text_embeddings
 
@@ -646,7 +626,6 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
             raise ValueError(f"The value of strength should in [0.0, 1.0] but is {strength}")
 
         if height % 8 != 0 or width % 8 != 0:
-            print(height, width)
             raise ValueError(f"`height` and `width` have to be divisible by 8 but are {height} and {width}.")
 
         if (callback_steps is None) or (
@@ -656,9 +635,9 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
                 f"`callback_steps` has to be a positive integer but is {callback_steps} of type" f" {type(callback_steps)}."
             )
 
-    def get_timesteps(self, num_inference_steps, strength, device, is_text2img):
+    def get_timesteps(self, num_inference_steps, strength, is_text2img):
         if is_text2img:
-            return self.scheduler.timesteps.to(device), num_inference_steps
+            return self.scheduler.timesteps, num_inference_steps
         else:
             # get the original timestep using init_timestep
             offset = self.scheduler.config.get("steps_offset", 0)
@@ -666,12 +645,12 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
             init_timestep = min(init_timestep, num_inference_steps)
 
             t_start = max(num_inference_steps - init_timestep + offset, 0)
-            timesteps = self.scheduler.timesteps[t_start:].to(device)
+            timesteps = self.scheduler.timesteps[t_start:]
             return timesteps, num_inference_steps - t_start
 
-    def run_safety_checker(self, image, device, dtype):
+    def run_safety_checker(self, image, dtype):
         if self.safety_checker is not None:
-            safety_checker_input = self.feature_extractor(self.numpy_to_pil(image), return_tensors="pt").to(device)
+            safety_checker_input = self.feature_extractor(self.numpy_to_pil(image), return_tensors="pd")
             image, has_nsfw_concept = self.safety_checker(images=image, clip_input=safety_checker_input.pixel_values.to(dtype))
         else:
             has_nsfw_concept = None
@@ -680,9 +659,9 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
     def decode_latents(self, latents):
         latents = 1 / 0.18215 * latents
         image = self.vae.decode(latents).sample
-        image = (image / 2 + 0.5).clamp(0, 1)
+        image = (image / 2 + 0.5).clip(0, 1)
         # we always cast to float32 as this does not cause significant overhead and is compatible with bfloat16
-        image = image.cpu().permute(0, 2, 3, 1).float().numpy()
+        image = image.transpose([0, 2, 3, 1]).float().numpy()
         return image
 
     def prepare_extra_step_kwargs(self, generator, eta):
@@ -702,7 +681,7 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
             extra_step_kwargs["generator"] = generator
         return extra_step_kwargs
 
-    def prepare_latents(self, image, timestep, batch_size, height, width, dtype, device, generator, latents=None):
+    def prepare_latents(self, image, timestep, batch_size, height, width, dtype, generator, latents=None):
         if image is None:
             shape = (
                 batch_size,
@@ -712,15 +691,11 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
             )
 
             if latents is None:
-                if device.type == "mps":
-                    # randn does not work reproducibly on mps
-                    latents = torch.randn(shape, generator=generator, device="cpu", dtype=dtype).to(device)
-                else:
-                    latents = torch.randn(shape, generator=generator, device=device, dtype=dtype)
+                latents = paddle.randn(shape, generator=generator, dtype=dtype)
             else:
                 if latents.shape != shape:
                     raise ValueError(f"Unexpected latents shape, got {latents.shape}, expected {shape}")
-                latents = latents.to(device)
+                latents = latents
 
             # scale the initial noise by the standard deviation required by the scheduler
             latents = latents * self.scheduler.init_noise_sigma
@@ -729,25 +704,22 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
             init_latent_dist = self.vae.encode(image).latent_dist
             init_latents = init_latent_dist.sample(generator=generator)
             init_latents = 0.18215 * init_latents
-            init_latents = torch.cat([init_latents] * batch_size, dim=0)
+            init_latents = paddle.concat([init_latents] * batch_size, axis=0)
             init_latents_orig = init_latents
             shape = init_latents.shape
 
             # add noise to latents using the timesteps
-            if device.type == "mps":
-                noise = torch.randn(shape, generator=generator, device="cpu", dtype=dtype).to(device)
-            else:
-                noise = torch.randn(shape, generator=generator, device=device, dtype=dtype)
+            noise = paddle.randn(shape, generator=generator, dtype=dtype)
             latents = self.scheduler.add_noise(init_latents, noise, timestep)
             return latents, init_latents_orig, noise
 
-    @torch.no_grad()
+    @paddle.no_grad()
     def __call__(
         self,
         prompt: Union[str, List[str]],
         negative_prompt: Optional[Union[str, List[str]]] = None,
-        image: Union[torch.FloatTensor, PIL.Image.Image] = None,
-        mask_image: Union[torch.FloatTensor, PIL.Image.Image] = None,
+        image: Union[paddle.Tensor, PIL.Image.Image] = None,
+        mask_image: Union[paddle.Tensor, PIL.Image.Image] = None,
         height: int = 512,
         width: int = 512,
         num_inference_steps: int = 50,
@@ -755,14 +727,14 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
         strength: float = 0.8,
         num_images_per_prompt: Optional[int] = 1,
         eta: float = 0.0,
-        generator: Optional[torch.Generator] = None,
-        latents: Optional[torch.FloatTensor] = None,
+        generator: Optional[paddle.Generator] = None,
+        latents: Optional[paddle.Tensor] = None,
         max_embeddings_multiples: Optional[int] = 3,
         output_type: Optional[str] = "pil",
         return_dict: bool = True,
         controlnet=None,
         controlnet_image=None,
-        callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
+        callback: Optional[Callable[[int, int, paddle.Tensor], None]] = None,
         is_cancelled_callback: Optional[Callable[[], bool]] = None,
         callback_steps: int = 1,
     ):
@@ -775,10 +747,10 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
             negative_prompt (`str` or `List[str]`, *optional*):
                 The prompt or prompts not to guide the image generation. Ignored when not using guidance (i.e., ignored
                 if `guidance_scale` is less than `1`).
-            image (`torch.FloatTensor` or `PIL.Image.Image`):
+            image (`paddle.Tensor` or `PIL.Image.Image`):
                 `Image`, or tensor representing an image batch, that will be used as the starting point for the
                 process.
-            mask_image (`torch.FloatTensor` or `PIL.Image.Image`):
+            mask_image (`paddle.Tensor` or `PIL.Image.Image`):
                 `Image`, or tensor representing an image batch, to mask `image`. White pixels in the mask will be
                 replaced by noise and therefore repainted, while black pixels will be preserved. If `mask_image` is a
                 PIL image, it will be converted to a single channel (luminance) before use. If it's a tensor, it should
@@ -807,10 +779,10 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
             eta (`float`, *optional*, defaults to 0.0):
                 Corresponds to parameter eta (η) in the DDIM paper: https://arxiv.org/abs/2010.02502. Only applies to
                 [`schedulers.DDIMScheduler`], will be ignored for others.
-            generator (`torch.Generator`, *optional*):
-                A [torch generator](https://pytorch.org/docs/stable/generated/torch.Generator.html) to make generation
+            generator (`paddle.Generator`, *optional*):
+                A [torch generator](https://pytorch.org/docs/stable/generated/paddle.Generator.html) to make generation
                 deterministic.
-            latents (`torch.FloatTensor`, *optional*):
+            latents (`paddle.Tensor`, *optional*):
                 Pre-generated noisy latents, sampled from a Gaussian distribution, to be used as inputs for image
                 generation. Can be used to tweak the same generation with different prompts. If not provided, a latents
                 tensor will ge generated by sampling using the supplied random `generator`.
@@ -824,12 +796,12 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
                 plain tuple.
             controlnet (`diffusers.ControlNetModel`, *optional*):
                 A controlnet model to be used for the inference. If not provided, controlnet will be disabled.
-            controlnet_image (`torch.FloatTensor` or `PIL.Image.Image`, *optional*):
+            controlnet_image (`paddle.Tensor` or `PIL.Image.Image`, *optional*):
                 `Image`, or tensor representing an image batch, to be used as the starting point for the controlnet
                 inference.
             callback (`Callable`, *optional*):
                 A function that will be called every `callback_steps` steps during inference. The function will be
-                called with the following arguments: `callback(step: int, timestep: int, latents: torch.FloatTensor)`.
+                called with the following arguments: `callback(step: int, timestep: int, latents: paddle.Tensor)`.
             is_cancelled_callback (`Callable`, *optional*):
                 A function that will be called every `callback_steps` steps during inference. If the function returns
                 `True`, the inference will be cancelled.
@@ -857,7 +829,6 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
 
         # 2. Define call parameters
         batch_size = 1 if isinstance(prompt, str) else len(prompt)
-        device = self._execution_device
         # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
         # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
         # corresponds to doing no classifier free guidance.
@@ -866,7 +837,6 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
         # 3. Encode input prompt
         text_embeddings = self._encode_prompt(
             prompt,
-            device,
             num_images_per_prompt,
             do_classifier_free_guidance,
             negative_prompt,
@@ -878,23 +848,23 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
         if isinstance(image, PIL.Image.Image):
             image = preprocess_image(image)
         if image is not None:
-            image = image.to(device=self.device, dtype=dtype)
+            image = image.to(dtype=dtype)
         if isinstance(mask_image, PIL.Image.Image):
             mask_image = preprocess_mask(mask_image, self.vae_scale_factor)
         if mask_image is not None:
-            mask = mask_image.to(device=self.device, dtype=dtype)
-            mask = torch.cat([mask] * batch_size * num_images_per_prompt)
+            mask = mask_image.to(dtype=dtype)
+            mask = paddle.concat([mask] * batch_size * num_images_per_prompt)
         else:
             mask = None
 
         if controlnet_image is not None:
             controlnet_image = prepare_controlnet_image(
-                controlnet_image, width, height, batch_size, 1, self.device, controlnet.dtype, do_classifier_free_guidance, False
+                controlnet_image, width, height, batch_size, 1, controlnet.dtype, do_classifier_free_guidance, False
             )
 
         # 5. set timesteps
-        self.scheduler.set_timesteps(num_inference_steps, device=device)
-        timesteps, num_inference_steps = self.get_timesteps(num_inference_steps, strength, device, image is None)
+        self.scheduler.set_timesteps(num_inference_steps, )
+        timesteps, num_inference_steps = self.get_timesteps(num_inference_steps, strength, image is None)
         latent_timestep = timesteps[:1].repeat(batch_size * num_images_per_prompt)
 
         # 6. Prepare latent variables
@@ -905,7 +875,6 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
             height,
             width,
             dtype,
-            device,
             generator,
             latents,
         )
@@ -916,7 +885,7 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
         # 8. Denoising loop
         for i, t in enumerate(self.progress_bar(timesteps)):
             # expand the latents if we are doing classifier free guidance
-            latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
+            latent_model_input = paddle.concat([latents] * 2) if do_classifier_free_guidance else latents
             latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
             unet_additional_args = {}
@@ -946,7 +915,7 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
 
             if mask is not None:
                 # masking
-                init_latents_proper = self.scheduler.add_noise(init_latents_orig, noise, torch.tensor([t]))
+                init_latents_proper = self.scheduler.add_noise(init_latents_orig, noise, paddle.to_tensor([t]))
                 latents = (init_latents_proper * mask) + (latents * (1 - mask))
 
             # call the callback, if provided
@@ -974,12 +943,12 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
         guidance_scale: float = 7.5,
         num_images_per_prompt: Optional[int] = 1,
         eta: float = 0.0,
-        generator: Optional[torch.Generator] = None,
-        latents: Optional[torch.FloatTensor] = None,
+        generator: Optional[paddle.Generator] = None,
+        latents: Optional[paddle.Tensor] = None,
         max_embeddings_multiples: Optional[int] = 3,
         output_type: Optional[str] = "pil",
         return_dict: bool = True,
-        callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
+        callback: Optional[Callable[[int, int, paddle.Tensor], None]] = None,
         is_cancelled_callback: Optional[Callable[[], bool]] = None,
         callback_steps: int = 1,
     ):
@@ -1009,10 +978,10 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
             eta (`float`, *optional*, defaults to 0.0):
                 Corresponds to parameter eta (η) in the DDIM paper: https://arxiv.org/abs/2010.02502. Only applies to
                 [`schedulers.DDIMScheduler`], will be ignored for others.
-            generator (`torch.Generator`, *optional*):
-                A [torch generator](https://pytorch.org/docs/stable/generated/torch.Generator.html) to make generation
+            generator (`paddle.Generator`, *optional*):
+                A [torch generator](https://pytorch.org/docs/stable/generated/paddle.Generator.html) to make generation
                 deterministic.
-            latents (`torch.FloatTensor`, *optional*):
+            latents (`paddle.Tensor`, *optional*):
                 Pre-generated noisy latents, sampled from a Gaussian distribution, to be used as inputs for image
                 generation. Can be used to tweak the same generation with different prompts. If not provided, a latents
                 tensor will ge generated by sampling using the supplied random `generator`.
@@ -1026,7 +995,7 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
                 plain tuple.
             callback (`Callable`, *optional*):
                 A function that will be called every `callback_steps` steps during inference. The function will be
-                called with the following arguments: `callback(step: int, timestep: int, latents: torch.FloatTensor)`.
+                called with the following arguments: `callback(step: int, timestep: int, latents: paddle.Tensor)`.
             is_cancelled_callback (`Callable`, *optional*):
                 A function that will be called every `callback_steps` steps during inference. If the function returns
                 `True`, the inference will be cancelled.
@@ -1061,7 +1030,7 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
 
     def img2img(
         self,
-        image: Union[torch.FloatTensor, PIL.Image.Image],
+        image: Union[paddle.Tensor, PIL.Image.Image],
         prompt: Union[str, List[str]],
         negative_prompt: Optional[Union[str, List[str]]] = None,
         strength: float = 0.8,
@@ -1069,18 +1038,18 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
         guidance_scale: Optional[float] = 7.5,
         num_images_per_prompt: Optional[int] = 1,
         eta: Optional[float] = 0.0,
-        generator: Optional[torch.Generator] = None,
+        generator: Optional[paddle.Generator] = None,
         max_embeddings_multiples: Optional[int] = 3,
         output_type: Optional[str] = "pil",
         return_dict: bool = True,
-        callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
+        callback: Optional[Callable[[int, int, paddle.Tensor], None]] = None,
         is_cancelled_callback: Optional[Callable[[], bool]] = None,
         callback_steps: int = 1,
     ):
         r"""
         Function for image-to-image generation.
         Args:
-            image (`torch.FloatTensor` or `PIL.Image.Image`):
+            image (`paddle.Tensor` or `PIL.Image.Image`):
                 `Image`, or tensor representing an image batch, that will be used as the starting point for the
                 process.
             prompt (`str` or `List[str]`):
@@ -1108,8 +1077,8 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
             eta (`float`, *optional*, defaults to 0.0):
                 Corresponds to parameter eta (η) in the DDIM paper: https://arxiv.org/abs/2010.02502. Only applies to
                 [`schedulers.DDIMScheduler`], will be ignored for others.
-            generator (`torch.Generator`, *optional*):
-                A [torch generator](https://pytorch.org/docs/stable/generated/torch.Generator.html) to make generation
+            generator (`paddle.Generator`, *optional*):
+                A [torch generator](https://pytorch.org/docs/stable/generated/paddle.Generator.html) to make generation
                 deterministic.
             max_embeddings_multiples (`int`, *optional*, defaults to `3`):
                 The max multiple length of prompt embeddings compared to the max output length of text encoder.
@@ -1121,7 +1090,7 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
                 plain tuple.
             callback (`Callable`, *optional*):
                 A function that will be called every `callback_steps` steps during inference. The function will be
-                called with the following arguments: `callback(step: int, timestep: int, latents: torch.FloatTensor)`.
+                called with the following arguments: `callback(step: int, timestep: int, latents: paddle.Tensor)`.
             is_cancelled_callback (`Callable`, *optional*):
                 A function that will be called every `callback_steps` steps during inference. If the function returns
                 `True`, the inference will be cancelled.
@@ -1155,8 +1124,8 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
 
     def inpaint(
         self,
-        image: Union[torch.FloatTensor, PIL.Image.Image],
-        mask_image: Union[torch.FloatTensor, PIL.Image.Image],
+        image: Union[paddle.Tensor, PIL.Image.Image],
+        mask_image: Union[paddle.Tensor, PIL.Image.Image],
         prompt: Union[str, List[str]],
         negative_prompt: Optional[Union[str, List[str]]] = None,
         strength: float = 0.8,
@@ -1164,21 +1133,21 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
         guidance_scale: Optional[float] = 7.5,
         num_images_per_prompt: Optional[int] = 1,
         eta: Optional[float] = 0.0,
-        generator: Optional[torch.Generator] = None,
+        generator: Optional[paddle.Generator] = None,
         max_embeddings_multiples: Optional[int] = 3,
         output_type: Optional[str] = "pil",
         return_dict: bool = True,
-        callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
+        callback: Optional[Callable[[int, int, paddle.Tensor], None]] = None,
         is_cancelled_callback: Optional[Callable[[], bool]] = None,
         callback_steps: int = 1,
     ):
         r"""
         Function for inpaint.
         Args:
-            image (`torch.FloatTensor` or `PIL.Image.Image`):
+            image (`paddle.Tensor` or `PIL.Image.Image`):
                 `Image`, or tensor representing an image batch, that will be used as the starting point for the
                 process. This is the image whose masked region will be inpainted.
-            mask_image (`torch.FloatTensor` or `PIL.Image.Image`):
+            mask_image (`paddle.Tensor` or `PIL.Image.Image`):
                 `Image`, or tensor representing an image batch, to mask `image`. White pixels in the mask will be
                 replaced by noise and therefore repainted, while black pixels will be preserved. If `mask_image` is a
                 PIL image, it will be converted to a single channel (luminance) before use. If it's a tensor, it should
@@ -1207,8 +1176,8 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
             eta (`float`, *optional*, defaults to 0.0):
                 Corresponds to parameter eta (η) in the DDIM paper: https://arxiv.org/abs/2010.02502. Only applies to
                 [`schedulers.DDIMScheduler`], will be ignored for others.
-            generator (`torch.Generator`, *optional*):
-                A [torch generator](https://pytorch.org/docs/stable/generated/torch.Generator.html) to make generation
+            generator (`paddle.Generator`, *optional*):
+                A [torch generator](https://pytorch.org/docs/stable/generated/paddle.Generator.html) to make generation
                 deterministic.
             max_embeddings_multiples (`int`, *optional*, defaults to `3`):
                 The max multiple length of prompt embeddings compared to the max output length of text encoder.
@@ -1220,7 +1189,7 @@ class StableDiffusionLongPromptWeightingPipeline(StableDiffusionPipeline):
                 plain tuple.
             callback (`Callable`, *optional*):
                 A function that will be called every `callback_steps` steps during inference. The function will be
-                called with the following arguments: `callback(step: int, timestep: int, latents: torch.FloatTensor)`.
+                called with the following arguments: `callback(step: int, timestep: int, latents: paddle.Tensor)`.
             is_cancelled_callback (`Callable`, *optional*):
                 A function that will be called every `callback_steps` steps during inference. If the function returns
                 `True`, the inference will be cancelled.

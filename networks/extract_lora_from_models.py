@@ -34,7 +34,7 @@ def svd(args):
         if p == "fp16":
             return torch.float16
         if p == "bf16":
-            return torch.bfloat16
+            return paddle.bfloat16
         return None
 
     assert args.v2 != args.sdxl or (
@@ -116,7 +116,7 @@ def svd(args):
     # make LoRA with svd
     print("calculating by svd")
     lora_weights = {}
-    with torch.no_grad():
+    with paddle.no_grad():
         for lora_name, mat in tqdm(list(diffs.items())):
             # if args.conv_dim is None, diffs do not include LoRAs for conv2d-3x3
             conv2d = len(mat.size()) == 4
@@ -157,8 +157,8 @@ def svd(args):
                 U = U.reshape(out_dim, rank, 1, 1)
                 Vh = Vh.reshape(rank, in_dim, kernel_size[0], kernel_size[1])
 
-            U = U.to("cpu").contiguous()
-            Vh = Vh.to("cpu").contiguous()
+            U = U.to("cpu")
+            Vh = Vh.to("cpu")
 
             lora_weights[lora_name] = (U, Vh)
 

@@ -50,9 +50,9 @@ def split_lora_model(lora_sd, unit):
         new_sd = {}
         for key, value in lora_sd.items():
             if "lora_down" in key:
-                new_sd[key] = value[:rank].contiguous()
+                new_sd[key] = value[:rank]
             elif "lora_up" in key:
-                new_sd[key] = value[:, :rank].contiguous()
+                new_sd[key] = value[:, :rank]
             else:
                 # なぜかscaleするとおかしくなる……
                 # this_rank = lora_sd[key.replace("alpha", "lora_down.weight")].size()[0]

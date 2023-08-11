@@ -17,31 +17,31 @@ class ControlNetInfo(NamedTuple):
     ratio: float
 
 
-class ControlNet(torch.nn.Module):
+class ControlNet(paddle.nn.Layer):
     def __init__(self) -> None:
         super().__init__()
 
         # make control model
-        self.control_model = torch.nn.Module()
+        self.control_model = paddle.nn.Layer()
 
         dims = [320, 320, 320, 320, 640, 640, 640, 1280, 1280, 1280, 1280, 1280]
-        zero_convs = torch.nn.ModuleList()
+        zero_convs = paddle.nn.LayerList()
         for i, dim in enumerate(dims):
-            sub_list = torch.nn.ModuleList([torch.nn.Conv2d(dim, dim, 1)])
+            sub_list = paddle.nn.LayerList([paddle.nn.Conv2D(dim, dim, 1)])
             zero_convs.append(sub_list)
         self.control_model.add_module("zero_convs", zero_convs)
 
-        middle_block_out = torch.nn.Conv2d(1280, 1280, 1)
-        self.control_model.add_module("middle_block_out", torch.nn.ModuleList([middle_block_out]))
+        middle_block_out = paddle.nn.Conv2D(1280, 1280, 1)
+        self.control_model.add_module("middle_block_out", paddle.nn.LayerList([middle_block_out]))
 
         dims = [16, 16, 32, 32, 96, 96, 256, 320]
         strides = [1, 1, 2, 1, 2, 1, 2, 1]
         prev_dim = 3
-        input_hint_block = torch.nn.Sequential()
+        input_hint_block = paddle.nn.Sequential()
         for i, (dim, stride) in enumerate(zip(dims, strides)):
-            input_hint_block.append(torch.nn.Conv2d(prev_dim, dim, 3, stride, 1))
+            input_hint_block.append(paddle.nn.Conv2D(prev_dim, dim, 3, stride, 1))
             if i < len(dims) - 1:
-                input_hint_block.append(torch.nn.SiLU())
+                input_hint_block.append(torch.nn.Silu())
             prev_dim = dim
         self.control_model.add_module("input_hint_block", input_hint_block)
 
@@ -242,9 +242,9 @@ def unet_forward(
         # This would be a good case for the `match` statement (Python 3.10+)
         is_mps = sample.device.type == "mps"
         if isinstance(timestep, float):
-            dtype = torch.float32 if is_mps else torch.float64
+            dtype = paddle.float32 if is_mps else paddle.float64
         else:
-            dtype = torch.int32 if is_mps else torch.int64
+            dtype = paddle.int32 if is_mps else paddle.int64
         timesteps = torch.tensor([timesteps], dtype=dtype, device=sample.device)
     elif len(timesteps.shape) == 0:
         timesteps = timesteps[None].to(sample.device)

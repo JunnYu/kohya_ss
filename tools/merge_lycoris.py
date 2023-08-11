@@ -58,10 +58,10 @@ def main():
     dtype = {
         'float': torch.float,
         'float16': torch.float16,
-        'float32': torch.float32,
-        'float64': torch.float64,
-        'bfloat': torch.bfloat16,
-        'bfloat16': torch.bfloat16,
+        'float32': paddle.float32,
+        'float64': paddle.float64,
+        'bfloat': paddle.bfloat16,
+        'bfloat16': paddle.bfloat16,
     }.get(dtype_str, None)
     if dtype is None:
         raise ValueError(f'Cannot Find the dtype "{dtype}"')

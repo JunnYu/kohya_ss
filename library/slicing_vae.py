@@ -17,16 +17,16 @@ from dataclasses import dataclass
 from typing import Optional, Tuple, Union
 
 import numpy as np
-import torch
-import torch.nn as nn
+import paddle
+import paddle.nn as nn
 
 
 from ppdiffusers.configuration_utils import ConfigMixin, register_to_config
-from ppdiffusers.modeling_utils import ModelMixin
+from ppdiffusers.models.modeling_utils import ModelMixin
 from ppdiffusers.utils import BaseOutput
 from ppdiffusers.models.unet_2d_blocks import UNetMidBlock2D, get_down_block, get_up_block, ResnetBlock2D
-from ppdiffusers.models.vae import DecoderOutput, Encoder, AutoencoderKLOutput, DiagonalGaussianDistribution
-
+from ppdiffusers.models.vae import DecoderOutput, Encoder, DiagonalGaussianDistribution
+from ppdiffusers.models.autoencoder_kl import AutoencoderKLOutput
 
 def slice_h(x, num_slices):
     # slice with pad 1 both sides: to eliminate side effect of padding of conv2d
@@ -58,7 +58,7 @@ def cat_h(sliced):
         else:
             cat.append(x[:, :, 1:-1, :])
         del x
-    x = torch.cat(cat, dim=2)
+    x = paddle.concat(cat, axis=2)
     return x
 
 
@@ -68,16 +68,16 @@ def resblock_forward(_self, num_slices, input_tensor, temb):
     assert temb is None
 
     # make sure norms are on cpu
-    org_device = input_tensor.device
-    cpu_device = torch.device("cpu")
+    org_device = input_tensor.place
+    cpu_device = "cpu"
     _self.norm1.to(cpu_device)
     _self.norm2.to(cpu_device)
 
     # GroupNormがCPUでfp16で動かない対策
     org_dtype = input_tensor.dtype
-    if org_dtype == torch.float16:
-        _self.norm1.to(torch.float32)
-        _self.norm2.to(torch.float32)
+    if org_dtype == paddle.float16:
+        _self.norm1.to(paddle.float32)
+        _self.norm2.to(paddle.float32)
 
     # すべてのテンソルをCPUに移動する
     input_tensor = input_tensor.to(cpu_device)
@@ -99,11 +99,11 @@ def resblock_forward(_self, num_slices, input_tensor, temb):
     #     return num_div, x
 
     # normを分割すると結果が変わるので、ここだけは分割しない。GPUで計算するとVRAMが足りなくなるので、CPUで計算する。幸いCPUでもそこまで遅くない
-    if org_dtype == torch.float16:
-        hidden_states = hidden_states.to(torch.float32)
+    if org_dtype == paddle.float16:
+        hidden_states = hidden_states.to(paddle.float32)
     hidden_states = _self.norm1(hidden_states)  # run on cpu
-    if org_dtype == torch.float16:
-        hidden_states = hidden_states.to(torch.float16)
+    if org_dtype == paddle.float16:
+        hidden_states = hidden_states.to(paddle.float16)
 
     sliced = slice_h(hidden_states, num_slices)
     del hidden_states
@@ -123,11 +123,11 @@ def resblock_forward(_self, num_slices, input_tensor, temb):
     hidden_states = cat_h(sliced)
     del sliced
 
-    if org_dtype == torch.float16:
-        hidden_states = hidden_states.to(torch.float32)
+    if org_dtype == paddle.float16:
+        hidden_states = hidden_states.to(paddle.float32)
     hidden_states = _self.norm2(hidden_states)  # run on cpu
-    if org_dtype == torch.float16:
-        hidden_states = hidden_states.to(torch.float16)
+    if org_dtype == paddle.float16:
+        hidden_states = hidden_states.to(paddle.float16)
 
     sliced = slice_h(hidden_states, num_slices)
     del hidden_states
@@ -149,7 +149,7 @@ def resblock_forward(_self, num_slices, input_tensor, temb):
 
     # make shortcut
     if _self.conv_shortcut is not None:
-        sliced = list(torch.chunk(input_tensor, num_slices, dim=2))  # no padding in conv_shortcut パディングがないので普通にスライスする
+        sliced = list(paddle.chunk(input_tensor, num_slices, axis=2))  # no padding in conv_shortcut パディングがないので普通にスライスする
         del input_tensor
 
         for i in range(len(sliced)):
@@ -162,7 +162,7 @@ def resblock_forward(_self, num_slices, input_tensor, temb):
             sliced[i] = x
             del x
 
-        input_tensor = torch.cat(sliced, dim=2)
+        input_tensor = paddle.cat(sliced, axis=2)
         del sliced
 
     output_tensor = (input_tensor + hidden_states) / _self.output_scale_factor
@@ -171,7 +171,7 @@ def resblock_forward(_self, num_slices, input_tensor, temb):
     return output_tensor
 
 
-class SlicingEncoder(nn.Module):
+class SlicingEncoder(nn.Layer):
     def __init__(
         self,
         in_channels=3,
@@ -187,10 +187,10 @@ class SlicingEncoder(nn.Module):
         super().__init__()
         self.layers_per_block = layers_per_block
 
-        self.conv_in = torch.nn.Conv2d(in_channels, block_out_channels[0], kernel_size=3, stride=1, padding=1)
+        self.conv_in = paddle.nn.Conv2D(in_channels, block_out_channels[0], kernel_size=3, stride=1, padding=1)
 
         self.mid_block = None
-        self.down_blocks = nn.ModuleList([])
+        self.down_blocks = nn.LayerList([])
 
         # down
         output_channel = block_out_channels[0]
@@ -229,10 +229,10 @@ class SlicingEncoder(nn.Module):
 
         # out
         self.conv_norm_out = nn.GroupNorm(num_channels=block_out_channels[-1], num_groups=norm_num_groups, eps=1e-6)
-        self.conv_act = nn.SiLU()
+        self.conv_act = nn.Silu()
 
         conv_out_channels = 2 * out_channels if double_z else out_channels
-        self.conv_out = nn.Conv2d(block_out_channels[-1], conv_out_channels, 3, padding=1)
+        self.conv_out = nn.Conv2D(block_out_channels[-1], conv_out_channels, 3, padding=1)
 
         # replace forward of ResBlocks
         def wrapper(func, module, num_slices):
@@ -266,8 +266,8 @@ class SlicingEncoder(nn.Module):
         sample = x
         del x
 
-        org_device = sample.device
-        cpu_device = torch.device("cpu")
+        org_device = sample.place
+        cpu_device = "cpu"
 
         # sample = self.conv_in(sample)
         sample = sample.to(cpu_device)
@@ -310,11 +310,11 @@ class SlicingEncoder(nn.Module):
         print("downsample forward", num_slices, hidden_states.shape)
 
         org_device = hidden_states.device
-        cpu_device = torch.device("cpu")
+        cpu_device = "cpu"
 
         hidden_states = hidden_states.to(cpu_device)
         pad = (0, 1, 0, 1)
-        hidden_states = torch.nn.functional.pad(hidden_states, pad, mode="constant", value=0)
+        hidden_states = paddle.nn.functional.pad(hidden_states, pad, mode="constant", value=0, data_format="NCHW")
 
         # slice with even number because of stride 2
         # strideが2なので偶数でスライスする
@@ -347,14 +347,14 @@ class SlicingEncoder(nn.Module):
             if i == 0:
                 hidden_states = x
             else:
-                hidden_states = torch.cat([hidden_states, x], dim=2)
+                hidden_states = paddle.concat([hidden_states, x], axis=2)
 
         hidden_states = hidden_states.to(org_device)
         # print("downsample forward done", hidden_states.shape)
         return hidden_states
 
 
-class SlicingDecoder(nn.Module):
+class SlicingDecoder(nn.Layer):
     def __init__(
         self,
         in_channels=3,
@@ -369,10 +369,10 @@ class SlicingDecoder(nn.Module):
         super().__init__()
         self.layers_per_block = layers_per_block
 
-        self.conv_in = nn.Conv2d(in_channels, block_out_channels[-1], kernel_size=3, stride=1, padding=1)
+        self.conv_in = nn.Conv2D(in_channels, block_out_channels[-1], kernel_size=3, stride=1, padding=1)
 
         self.mid_block = None
-        self.up_blocks = nn.ModuleList([])
+        self.up_blocks = nn.LayerList([])
 
         # mid
         self.mid_block = UNetMidBlock2D(
@@ -414,8 +414,8 @@ class SlicingDecoder(nn.Module):
 
         # out
         self.conv_norm_out = nn.GroupNorm(num_channels=block_out_channels[0], num_groups=norm_num_groups, eps=1e-6)
-        self.conv_act = nn.SiLU()
-        self.conv_out = nn.Conv2d(block_out_channels[0], out_channels, 3, padding=1)
+        self.conv_act = nn.Silu()
+        self.conv_out = nn.Conv2D(block_out_channels[0], out_channels, 3, padding=1)
 
         # replace forward of ResBlocks
         def wrapper(func, module, num_slices):
@@ -464,7 +464,7 @@ class SlicingDecoder(nn.Module):
         # conv_out with slicing because of VRAM usage
         # conv_outはとてもVRAM使うのでスライスして対応
         org_device = sample.device
-        cpu_device = torch.device("cpu")
+        cpu_device = "cpu"
         sample = sample.to(cpu_device)
 
         sliced = slice_h(sample, self.num_slices)
@@ -489,7 +489,7 @@ class SlicingDecoder(nn.Module):
 
         org_dtype = hidden_states.dtype
         org_device = hidden_states.device
-        cpu_device = torch.device("cpu")
+        cpu_device = "cpu"
 
         hidden_states = hidden_states.to(cpu_device)
         sliced = slice_h(hidden_states, num_slices)
@@ -505,12 +505,12 @@ class SlicingDecoder(nn.Module):
             # TODO(Suraj): Remove this cast once the issue is fixed in PyTorch
             # https://github.com/pytorch/pytorch/issues/86679
             # PyTorch 2で直らないかね……
-            if org_dtype == torch.bfloat16:
-                x = x.to(torch.float32)
+            if org_dtype == paddle.bfloat16:
+                x = x.to(paddle.float32)
 
-            x = torch.nn.functional.interpolate(x, scale_factor=2.0, mode="nearest")
+            x = paddle.nn.functional.interpolate(x, scale_factor=2.0, mode="nearest")
 
-            if org_dtype == torch.bfloat16:
+            if org_dtype == paddle.bfloat16:
                 x = x.to(org_dtype)
 
             x = _self.conv(x)
@@ -527,7 +527,7 @@ class SlicingDecoder(nn.Module):
             sliced[i] = x
             del x
 
-        hidden_states = torch.cat(sliced, dim=2)
+        hidden_states = paddle.concat(sliced, aixs=2)
         # print("us hidden_states", hidden_states.shape)
         del sliced
 
@@ -598,11 +598,11 @@ class SlicingAutoencoderKL(ModelMixin, ConfigMixin):
             num_slices=num_slices,
         )
 
-        self.quant_conv = torch.nn.Conv2d(2 * latent_channels, 2 * latent_channels, 1)
-        self.post_quant_conv = torch.nn.Conv2d(latent_channels, latent_channels, 1)
+        self.quant_conv = paddle.nn.Conv2D(2 * latent_channels, 2 * latent_channels, 1)
+        self.post_quant_conv = paddle.nn.Conv2D(latent_channels, latent_channels, 1)
         self.use_slicing = False
 
-    def encode(self, x: torch.FloatTensor, return_dict: bool = True) -> AutoencoderKLOutput:
+    def encode(self, x: paddle.Tensor, return_dict: bool = True) -> AutoencoderKLOutput:
         h = self.encoder(x)
         moments = self.quant_conv(h)
         posterior = DiagonalGaussianDistribution(moments)
@@ -612,7 +612,7 @@ class SlicingAutoencoderKL(ModelMixin, ConfigMixin):
 
         return AutoencoderKLOutput(latent_dist=posterior)
 
-    def _decode(self, z: torch.FloatTensor, return_dict: bool = True) -> Union[DecoderOutput, torch.FloatTensor]:
+    def _decode(self, z: paddle.Tensor, return_dict: bool = True) -> Union[DecoderOutput, paddle.Tensor]:
         z = self.post_quant_conv(z)
         dec = self.decoder(z)
 
@@ -638,10 +638,10 @@ class SlicingAutoencoderKL(ModelMixin, ConfigMixin):
         """
         self.use_slicing = False
 
-    def decode(self, z: torch.FloatTensor, return_dict: bool = True) -> Union[DecoderOutput, torch.FloatTensor]:
+    def decode(self, z: paddle.Tensor, return_dict: bool = True) -> Union[DecoderOutput, paddle.Tensor]:
         if self.use_slicing and z.shape[0] > 1:
-            decoded_slices = [self._decode(z_slice).sample for z_slice in z.split(1)]
-            decoded = torch.cat(decoded_slices)
+            decoded_slices = [self._decode(z_slice).sample for z_slice in z.chunk(z.shape[0])]
+            decoded = paddle.concat(decoded_slices)
         else:
             decoded = self._decode(z).sample
 
@@ -652,14 +652,14 @@ class SlicingAutoencoderKL(ModelMixin, ConfigMixin):
 
     def forward(
         self,
-        sample: torch.FloatTensor,
+        sample: paddle.Tensor,
         sample_posterior: bool = False,
         return_dict: bool = True,
-        generator: Optional[torch.Generator] = None,
-    ) -> Union[DecoderOutput, torch.FloatTensor]:
+        generator: Optional[paddle.Generator] = None,
+    ) -> Union[DecoderOutput, paddle.Tensor]:
         r"""
         Args:
-            sample (`torch.FloatTensor`): Input sample.
+            sample (`paddle.Tensor`): Input sample.
             sample_posterior (`bool`, *optional*, defaults to `False`):
                 Whether to sample from the posterior.
             return_dict (`bool`, *optional*, defaults to `True`):

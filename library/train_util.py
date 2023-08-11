@@ -30,10 +30,10 @@ from io import BytesIO
 import toml
 
 from tqdm import tqdm
-import torch
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.optim import Optimizer
-from torchvision import transforms
+import paddle
+from paddle import DataParallel as DDP
+from paddle.optimizer import Optimizer
+from paddle.vision import transforms
 from paddlenlp.transformers import CLIPTokenizer, CLIPTextModel, CLIPTextModelWithProjection
 import transformers
 from ppdiffusers.optimization import SchedulerType, TYPE_TO_SCHEDULER_FUNCTION
@@ -116,8 +116,8 @@ class ImageInfo:
         self.image_size: Tuple[int, int] = None
         self.resized_size: Tuple[int, int] = None
         self.bucket_reso: Tuple[int, int] = None
-        self.latents: torch.Tensor = None
-        self.latents_flipped: torch.Tensor = None
+        self.latents: paddle.Tensor = None
+        self.latents_flipped: paddle.Tensor = None
         self.latents_npz: str = None
         self.latents_original_size: Tuple[int, int] = None  # original image size, not latents size
         self.latents_crop_ltrb: Tuple[int, int] = None  # crop left top right bottom in original pixel size, not latents size
@@ -125,9 +125,9 @@ class ImageInfo:
         self.image: Optional[Image.Image] = None  # optional, original PIL Image
         # SDXL, optional
         self.text_encoder_outputs_npz: Optional[str] = None
-        self.text_encoder_outputs1: Optional[torch.Tensor] = None
-        self.text_encoder_outputs2: Optional[torch.Tensor] = None
-        self.text_encoder_pool2: Optional[torch.Tensor] = None
+        self.text_encoder_outputs1: Optional[paddle.Tensor] = None
+        self.text_encoder_outputs2: Optional[paddle.Tensor] = None
+        self.text_encoder_pool2: Optional[paddle.Tensor] = None
 
 
 class BucketManager:
@@ -650,7 +650,7 @@ class BaseDataset(torch.utils.data.Dataset):
             tokenizer = self.tokenizers[0]
 
         input_ids = tokenizer(
-            caption, padding="max_length", truncation=True, max_length=self.tokenizer_max_length, return_tensors="pt"
+            caption, padding="max_length", truncation=True, max_length=self.tokenizer_max_length, return_tensors="pd"
         ).input_ids
 
         if self.tokenizer_max_length > tokenizer.model_max_length:
@@ -668,7 +668,7 @@ class BaseDataset(torch.utils.data.Dataset):
                         input_ids[i : i + tokenizer.model_max_length - 2],
                         input_ids[-1].unsqueeze(0),
                     )
-                    ids_chunk = torch.cat(ids_chunk)
+                    ids_chunk = paddle.concat(ids_chunk)
                     iids_list.append(ids_chunk)
             else:
                 # v2 or SDXL
@@ -679,7 +679,7 @@ class BaseDataset(torch.utils.data.Dataset):
                         input_ids[i : i + tokenizer.model_max_length - 2],
                         input_ids[-1].unsqueeze(0),
                     )  # PAD or EOS
-                    ids_chunk = torch.cat(ids_chunk)
+                    ids_chunk = paddle.concat(ids_chunk)
 
                     # 末尾が <EOS> <PAD> または <PAD> <PAD> の場合は、何もしなくてよい
                     # 末尾が x <PAD/EOS> の場合は末尾を <EOS> に変える（x <EOS> なら結果的に変化なし）
@@ -691,7 +691,7 @@ class BaseDataset(torch.utils.data.Dataset):
 
                     iids_list.append(ids_chunk)
 
-            input_ids = torch.stack(iids_list)  # 3,77
+            input_ids = paddle.stack(iids_list)  # 3,77
         return input_ids
 
     def register_image(self, info: ImageInfo, subset: BaseSubset):
@@ -926,8 +926,8 @@ class BaseDataset(torch.utils.data.Dataset):
         print("caching text encoder outputs...")
         for batch in tqdm(batches):
             infos, input_ids1, input_ids2 = zip(*batch)
-            input_ids1 = torch.stack(input_ids1, dim=0)
-            input_ids2 = torch.stack(input_ids2, dim=0)
+            input_ids1 = paddle.stack(input_ids1, axis=0)
+            input_ids2 = paddle.stack(input_ids2, axis=0)
             cache_batch_text_encoder_outputs(
                 infos, tokenizers, text_encoders, self.max_token_length, cache_to_disk, input_ids1, input_ids2, weight_dtype
             )
@@ -1045,7 +1045,7 @@ class BaseDataset(torch.utils.data.Dataset):
                 if flipped:
                     latents = flipped_latents
                     del flipped_latents
-                latents = torch.FloatTensor(latents)
+                latents = paddle.Tensor(latents)
 
                 image = None
             else:
@@ -1149,21 +1149,21 @@ class BaseDataset(torch.utils.data.Dataset):
                         input_ids2_list.append(token_caption2)
 
         example = {}
-        example["loss_weights"] = torch.FloatTensor(loss_weights)
+        example["loss_weights"] = paddle.Tensor(loss_weights)
 
         if len(text_encoder_outputs1_list) == 0:
             if self.token_padding_disabled:
                 # padding=True means pad in the batch
-                example["input_ids"] = self.tokenizer[0](captions, padding=True, truncation=True, return_tensors="pt").input_ids
+                example["input_ids"] = self.tokenizer[0](captions, padding=True, truncation=True, return_tensors="pd").input_ids
                 if len(self.tokenizers) > 1:
                     example["input_ids2"] = self.tokenizer[1](
-                        captions, padding=True, truncation=True, return_tensors="pt"
+                        captions, padding=True, truncation=True, return_tensors="pd"
                     ).input_ids
                 else:
                     example["input_ids2"] = None
             else:
-                example["input_ids"] = torch.stack(input_ids_list)
-                example["input_ids2"] = torch.stack(input_ids2_list) if len(self.tokenizers) > 1 else None
+                example["input_ids"] = paddle.stack(input_ids_list)
+                example["input_ids2"] = paddle.stack(input_ids2_list) if len(self.tokenizers) > 1 else None
             example["text_encoder_outputs1_list"] = None
             example["text_encoder_outputs2_list"] = None
             example["text_encoder_pool2_list"] = None
@@ -1171,25 +1171,25 @@ class BaseDataset(torch.utils.data.Dataset):
             example["input_ids"] = None
             example["input_ids2"] = None
             # # for assertion
-            # example["input_ids"] = torch.stack([self.get_input_ids(cap, self.tokenizers[0]) for cap in captions])
-            # example["input_ids2"] = torch.stack([self.get_input_ids(cap, self.tokenizers[1]) for cap in captions])
-            example["text_encoder_outputs1_list"] = torch.stack(text_encoder_outputs1_list)
-            example["text_encoder_outputs2_list"] = torch.stack(text_encoder_outputs2_list)
-            example["text_encoder_pool2_list"] = torch.stack(text_encoder_pool2_list)
+            # example["input_ids"] = paddle.stack([self.get_input_ids(cap, self.tokenizers[0]) for cap in captions])
+            # example["input_ids2"] = paddle.stack([self.get_input_ids(cap, self.tokenizers[1]) for cap in captions])
+            example["text_encoder_outputs1_list"] = paddle.stack(text_encoder_outputs1_list)
+            example["text_encoder_outputs2_list"] = paddle.stack(text_encoder_outputs2_list)
+            example["text_encoder_pool2_list"] = paddle.stack(text_encoder_pool2_list)
 
         if images[0] is not None:
-            images = torch.stack(images)
-            images = images.to(memory_format=torch.contiguous_format).float()
+            images = paddle.stack(images)
+            images = images.float()
         else:
             images = None
         example["images"] = images
 
-        example["latents"] = torch.stack(latents_list) if latents_list[0] is not None else None
+        example["latents"] = paddle.stack(latents_list) if latents_list[0] is not None else None
         example["captions"] = captions
 
-        example["original_sizes_hw"] = torch.stack([torch.LongTensor(x) for x in original_sizes_hw])
-        example["crop_top_lefts"] = torch.stack([torch.LongTensor(x) for x in crop_top_lefts])
-        example["target_sizes_hw"] = torch.stack([torch.LongTensor(x) for x in target_sizes_hw])
+        example["original_sizes_hw"] = paddle.stack([paddle.to_tensor(x, dtype="int64") for x in original_sizes_hw])
+        example["crop_top_lefts"] = paddle.stack([paddle.to_tensor(x, dtype="int64")for x in crop_top_lefts])
+        example["target_sizes_hw"] = paddle.stack([paddle.to_tensor(x, dtype="int64") for x in target_sizes_hw])
         example["flippeds"] = flippeds
 
         if self.debug_dataset:
@@ -1779,7 +1779,7 @@ class ControlNetDataset(BaseDataset):
             cond_img = self.conditioning_image_transforms(cond_img)
             conditioning_images.append(cond_img)
 
-        example["conditioning_images"] = torch.stack(conditioning_images).to(memory_format=torch.contiguous_format).float()
+        example["conditioning_images"] = paddle.stack(conditioning_images).to(memory_format=torch.contiguous_format).float()
 
         return example
 
@@ -1878,7 +1878,7 @@ def is_disk_cached_latents_is_expected(reso, npz_path: str, flip_aug: bool):
 # 戻り値は、latents_tensor, (original_size width, original_size height), (crop left, crop top)
 def load_latents_from_disk(
     npz_path,
-) -> Tuple[Optional[torch.Tensor], Optional[List[int]], Optional[List[int]], Optional[torch.Tensor]]:
+) -> Tuple[Optional[paddle.Tensor], Optional[List[int]], Optional[List[int]], Optional[paddle.Tensor]]:
     npz = np.load(npz_path)
     if "latents" not in npz:
         raise ValueError(f"error: npz is old format. please re-generate {npz_path}")
@@ -1923,7 +1923,7 @@ def debug_dataset(train_dataset, show_input_ids=False):
 
             example = train_dataset[idx]
             if example["latents"] is not None:
-                print(f"sample has latents from npz file: {example['latents'].size()}")
+                print(f"sample has latents from npz file: {example['latents'].shape}")
             for j, (ik, cap, lw, iid, orgsz, crptl, trgsz, flpdz) in enumerate(
                 zip(
                     example["image_keys"],
@@ -1953,7 +1953,7 @@ def debug_dataset(train_dataset, show_input_ids=False):
 
                     if "conditioning_images" in example:
                         cond_img = example["conditioning_images"][j]
-                        print(f"conditioning image size: {cond_img.size()}")
+                        print(f"conditioning image size: {cond_img.shape}")
                         cond_img = (cond_img.numpy() * 255.0).astype(np.uint8)
                         cond_img = np.transpose(cond_img, (1, 2, 0))
                         cond_img = cond_img[:, :, ::-1]
@@ -2050,15 +2050,15 @@ class MinimalDataset(BaseDataset):
 
                 captions.append(caption)
 
-            images = torch.stack(images, dim=0)
-            input_ids_list = torch.stack(input_ids_list, dim=0)
+            images = paddle.stack(images, dim=0)
+            input_ids_list = paddle.stack(input_ids_list, dim=0)
             example = {
                 "images": images,
                 "input_ids": input_ids_list,
                 "captions": captions,   # for debug_dataset
                 "latents": None,
                 "image_keys": image_keys,   # for debug_dataset
-                "loss_weights": torch.ones(batch_size, dtype=torch.float32),
+                "loss_weights": torch.ones(batch_size, dtype=paddle.float32),
             }
             return example
         """
@@ -2138,22 +2138,22 @@ def cache_batch_latents(
         info.latents_original_size = original_size
         info.latents_crop_ltrb = crop_ltrb
 
-    img_tensors = torch.stack(images, dim=0)
+    img_tensors = paddle.stack(images, dim=0)
     img_tensors = img_tensors.to(device=vae.device, dtype=vae.dtype)
 
-    with torch.no_grad():
+    with paddle.no_grad():
         latents = vae.encode(img_tensors).latent_dist.sample().to("cpu")
 
     if flip_aug:
-        img_tensors = torch.flip(img_tensors, dims=[3])
-        with torch.no_grad():
+        img_tensors = paddle.flip(img_tensors, axis=[3])
+        with paddle.no_grad():
             flipped_latents = vae.encode(img_tensors).latent_dist.sample().to("cpu")
     else:
         flipped_latents = [None] * len(latents)
 
     for info, latent, flipped_latent in zip(image_infos, latents, flipped_latents):
         # check NaN
-        if torch.isnan(latents).any() or (flipped_latent is not None and torch.isnan(flipped_latent).any()):
+        if paddle.isnan(latents).any() or (flipped_latent is not None and paddle.isnan(flipped_latent).any()):
             raise RuntimeError(f"NaN detected in latents: {info.absolute_path}")
 
         if cache_to_disk:
@@ -2164,17 +2164,17 @@ def cache_batch_latents(
                 info.latents_flipped = flipped_latent
 
     # FIXME this slows down caching a lot, specify this as an option
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    # if torch.cuda.is_available():
+    #     torch.cuda.empty_cache()
 
 
 def cache_batch_text_encoder_outputs(
     image_infos, tokenizers, text_encoders, max_token_length, cache_to_disk, input_ids1, input_ids2, dtype
 ):
-    input_ids1 = input_ids1.to(text_encoders[0].device)
-    input_ids2 = input_ids2.to(text_encoders[1].device)
+    input_ids1 = input_ids1#.to(text_encoders[0].device)
+    input_ids2 = input_ids2#.to(text_encoders[1].device)
 
-    with torch.no_grad():
+    with paddle.no_grad():
         b_hidden_state1, b_hidden_state2, b_pool2 = get_hidden_states_sdxl(
             max_token_length,
             input_ids1,
@@ -2211,9 +2211,9 @@ def save_text_encoder_outputs_to_disk(npz_path, hidden_state1, hidden_state2, po
 
 def load_text_encoder_outputs_from_disk(npz_path):
     with np.load(npz_path) as f:
-        hidden_state1 = torch.from_numpy(f["hidden_state1"])
-        hidden_state2 = torch.from_numpy(f["hidden_state2"]) if "hidden_state2" in f else None
-        pool2 = torch.from_numpy(f["pool2"]) if "pool2" in f else None
+        hidden_state1 = paddle.to_tensor(f["hidden_state1"])
+        hidden_state2 = paddle.to_tensor(f["hidden_state2"]) if "hidden_state2" in f else None
+        pool2 = paddle.to_tensor(f["pool2"]) if "pool2" in f else None
     return hidden_state1, hidden_state2, pool2
 
 
@@ -2368,9 +2368,9 @@ def get_git_revision_hash() -> str:
 #         q, k, v = map(lambda t: rearrange(t, "b n (h d) -> b n h d", h=h), (q_in, k_in, v_in))
 #         del q_in, k_in, v_in
 
-#         q = q.contiguous()
-#         k = k.contiguous()
-#         v = v.contiguous()
+#         q = q
+#         k = k
+#         v = v
 #         out = xformers.ops.memory_efficient_attention(q, k, v, attn_bias=None)  # 最適なのを選んでくれる
 
 #         out = rearrange(out, "b n h d -> b n (h d)", h=h)
@@ -2384,16 +2384,18 @@ def get_git_revision_hash() -> str:
 #     diffusers.models.attention.CrossAttention.forward = forward_xformers
 def replace_unet_modules(unet: UNet2DConditionModel, mem_eff_attn, xformers, sdpa):
     if mem_eff_attn:
-        print("Enable memory efficient attention for U-Net")
-        unet.set_use_memory_efficient_attention(False, True)
+        # print("Enable memory efficient attention for U-Net")
+        # unet.set_use_memory_efficient_attention(False, True)
+        unet.set_use_sdpa(True)
     elif xformers:
-        print("Enable xformers for U-Net")
-        try:
-            import xformers.ops
-        except ImportError:
-            raise ImportError("No xformers / xformersがインストールされていないようです")
+        # print("Enable xformers for U-Net")
+        # try:
+        #     import xformers.ops
+        # except ImportError:
+        #     raise ImportError("No xformers / xformersがインストールされていないようです")
 
-        unet.set_use_memory_efficient_attention(True, False)
+        # unet.set_use_memory_efficient_attention(True, False)
+        unet.set_use_sdpa(True)
     elif sdpa:
         print("Enable SDPA for U-Net")
         unet.set_use_sdpa(True)
@@ -3319,6 +3321,8 @@ def get_optimizer(args, trainable_params):
     # print("optkwargs:", optimizer_kwargs)
 
     lr = args.learning_rate
+    
+    lr = get_scheduler_fix(args, num_processes=args.num_processes)
     optimizer = None
 
     if optimizer_type == "Lion".lower():
@@ -3385,7 +3389,7 @@ def get_optimizer(args, trainable_params):
             print(f"SGD with Nesterov must be with momentum, set momentum to 0.9 / SGD with Nesterovはmomentum指定が必須のため0.9に設定します")
             optimizer_kwargs["momentum"] = 0.9
 
-        optimizer_class = torch.optim.SGD
+        optimizer_class = paddle.optimizer.SGD
         optimizer = optimizer_class(trainable_params, lr=lr, nesterov=True, **optimizer_kwargs)
 
     elif optimizer_type.startswith("DAdapt".lower()) or optimizer_type == "Prodigy".lower():
@@ -3504,15 +3508,15 @@ def get_optimizer(args, trainable_params):
 
     elif optimizer_type == "AdamW".lower():
         print(f"use AdamW optimizer | {optimizer_kwargs}")
-        optimizer_class = torch.optim.AdamW
-        optimizer = optimizer_class(trainable_params, lr=lr, **optimizer_kwargs)
+        optimizer_class = paddle.optimizer.AdamW
+        optimizer = optimizer_class(parameters=trainable_params, learning_rate=lr, **optimizer_kwargs)
 
     if optimizer is None:
         # 任意のoptimizerを使う
         optimizer_type = args.optimizer_type  # lowerでないやつ（微妙）
         print(f"use {optimizer_type} | {optimizer_kwargs}")
         if "." not in optimizer_type:
-            optimizer_module = torch.optim
+            optimizer_module = paddle.optimizer
         else:
             values = optimizer_type.split(".")
             optimizer_module = importlib.import_module(".".join(values[:-1]))
@@ -3524,14 +3528,14 @@ def get_optimizer(args, trainable_params):
     optimizer_name = optimizer_class.__module__ + "." + optimizer_class.__name__
     optimizer_args = ",".join([f"{k}={v}" for k, v in optimizer_kwargs.items()])
 
-    return optimizer_name, optimizer_args, optimizer
+    return optimizer_name, optimizer_args, optimizer, lr
 
 
 # Modified version of get_scheduler() function from ppdiffusers.optimizer.get_scheduler
 # Add some checking and features to the original function.
 
 
-def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
+def get_scheduler_fix(args, num_processes: int):
     """
     Unified API to get any scheduler from its name.
     """
@@ -3548,68 +3552,81 @@ def get_scheduler_fix(args, optimizer: Optimizer, num_processes: int):
             value = ast.literal_eval(value)
             lr_scheduler_kwargs[key] = value
 
-    def wrap_check_needless_num_warmup_steps(return_vals):
-        if num_warmup_steps is not None and num_warmup_steps != 0:
-            raise ValueError(f"{name} does not require `num_warmup_steps`. Set None or 0.")
-        return return_vals
+    lr_scheduler_type = args.lr_scheduler_type
+    
+    from ppdiffusers.optimization import get_scheduler
 
-    # using any lr_scheduler from other library
-    if args.lr_scheduler_type:
-        lr_scheduler_type = args.lr_scheduler_type
-        print(f"use {lr_scheduler_type} | {lr_scheduler_kwargs} as lr_scheduler")
-        if "." not in lr_scheduler_type:  # default to use torch.optim
-            lr_scheduler_module = torch.optim.lr_scheduler
-        else:
-            values = lr_scheduler_type.split(".")
-            lr_scheduler_module = importlib.import_module(".".join(values[:-1]))
-            lr_scheduler_type = values[-1]
-        lr_scheduler_class = getattr(lr_scheduler_module, lr_scheduler_type)
-        lr_scheduler = lr_scheduler_class(optimizer, **lr_scheduler_kwargs)
-        return wrap_check_needless_num_warmup_steps(lr_scheduler)
+    lr_scheduler = get_scheduler(
+        lr_scheduler_type,
+        learning_rate=args.learning_rate,
+        num_warmup_steps=num_warmup_steps,
+        num_training_steps=num_training_steps,
+        num_cycles=num_cycles,
+        power=power, )
+    return lr_scheduler
+    
+    # def wrap_check_needless_num_warmup_steps(return_vals):
+    #     if num_warmup_steps is not None and num_warmup_steps != 0:
+    #         raise ValueError(f"{name} does not require `num_warmup_steps`. Set None or 0.")
+    #     return return_vals
 
-    if name.startswith("adafactor"):
-        assert (
-            type(optimizer) == transformers.optimization.Adafactor
-        ), f"adafactor scheduler must be used with Adafactor optimizer / adafactor schedulerはAdafactorオプティマイザと同時に使ってください"
-        initial_lr = float(name.split(":")[1])
-        # print("adafactor scheduler init lr", initial_lr)
-        return wrap_check_needless_num_warmup_steps(transformers.optimization.AdafactorSchedule(optimizer, initial_lr))
+    # # using any lr_scheduler from other library
+    # if args.lr_scheduler_type:
+    #     lr_scheduler_type = args.lr_scheduler_type
+    #     print(f"use {lr_scheduler_type} | {lr_scheduler_kwargs} as lr_scheduler")
+    #     if "." not in lr_scheduler_type:  # default to use torch.optim
+    #         lr_scheduler_module = torch.optim.lr_scheduler
+    #     else:
+    #         values = lr_scheduler_type.split(".")
+    #         lr_scheduler_module = importlib.import_module(".".join(values[:-1]))
+    #         lr_scheduler_type = values[-1]
+    #     lr_scheduler_class = getattr(lr_scheduler_module, lr_scheduler_type)
+    #     lr_scheduler = lr_scheduler_class(optimizer, **lr_scheduler_kwargs)
+    #     return wrap_check_needless_num_warmup_steps(lr_scheduler)
 
-    name = SchedulerType(name)
-    schedule_func = TYPE_TO_SCHEDULER_FUNCTION[name]
+    # if name.startswith("adafactor"):
+    #     assert (
+    #         type(optimizer) == transformers.optimization.Adafactor
+    #     ), f"adafactor scheduler must be used with Adafactor optimizer / adafactor schedulerはAdafactorオプティマイザと同時に使ってください"
+    #     initial_lr = float(name.split(":")[1])
+    #     # print("adafactor scheduler init lr", initial_lr)
+    #     return wrap_check_needless_num_warmup_steps(transformers.optimization.AdafactorSchedule(optimizer, initial_lr))
 
-    if name == SchedulerType.CONSTANT:
-        return wrap_check_needless_num_warmup_steps(schedule_func(optimizer, **lr_scheduler_kwargs))
+    # name = SchedulerType(name)
+    # schedule_func = TYPE_TO_SCHEDULER_FUNCTION[name]
 
-    if name == SchedulerType.PIECEWISE_CONSTANT:
-        return schedule_func(optimizer, **lr_scheduler_kwargs)  # step_rules and last_epoch are given as kwargs
+    # if name == SchedulerType.CONSTANT:
+    #     return wrap_check_needless_num_warmup_steps(schedule_func(optimizer, **lr_scheduler_kwargs))
 
-    # All other schedulers require `num_warmup_steps`
-    if num_warmup_steps is None:
-        raise ValueError(f"{name} requires `num_warmup_steps`, please provide that argument.")
+    # if name == SchedulerType.PIECEWISE_CONSTANT:
+    #     return schedule_func(optimizer, **lr_scheduler_kwargs)  # step_rules and last_epoch are given as kwargs
 
-    if name == SchedulerType.CONSTANT_WITH_WARMUP:
-        return schedule_func(optimizer, num_warmup_steps=num_warmup_steps, **lr_scheduler_kwargs)
+    # # All other schedulers require `num_warmup_steps`
+    # if num_warmup_steps is None:
+    #     raise ValueError(f"{name} requires `num_warmup_steps`, please provide that argument.")
 
-    # All other schedulers require `num_training_steps`
-    if num_training_steps is None:
-        raise ValueError(f"{name} requires `num_training_steps`, please provide that argument.")
+    # if name == SchedulerType.CONSTANT_WITH_WARMUP:
+    #     return schedule_func(optimizer, num_warmup_steps=num_warmup_steps, **lr_scheduler_kwargs)
 
-    if name == SchedulerType.COSINE_WITH_RESTARTS:
-        return schedule_func(
-            optimizer,
-            num_warmup_steps=num_warmup_steps,
-            num_training_steps=num_training_steps,
-            num_cycles=num_cycles,
-            **lr_scheduler_kwargs,
-        )
+    # # All other schedulers require `num_training_steps`
+    # if num_training_steps is None:
+    #     raise ValueError(f"{name} requires `num_training_steps`, please provide that argument.")
 
-    if name == SchedulerType.POLYNOMIAL:
-        return schedule_func(
-            optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=num_training_steps, power=power, **lr_scheduler_kwargs
-        )
+    # if name == SchedulerType.COSINE_WITH_RESTARTS:
+    #     return schedule_func(
+    #         optimizer,
+    #         num_warmup_steps=num_warmup_steps,
+    #         num_training_steps=num_training_steps,
+    #         num_cycles=num_cycles,
+    #         **lr_scheduler_kwargs,
+    #     )
 
-    return schedule_func(optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=num_training_steps, **lr_scheduler_kwargs)
+    # if name == SchedulerType.POLYNOMIAL:
+    #     return schedule_func(
+    #         optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=num_training_steps, power=power, **lr_scheduler_kwargs
+    #     )
+
+    # return schedule_func(optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=num_training_steps, **lr_scheduler_kwargs)
 
 
 def prepare_dataset_args(args: argparse.Namespace, support_metadata: bool):
@@ -3655,7 +3672,7 @@ def load_tokenizer(args: argparse.Namespace):
 
     if tokenizer is None:
         if args.v2:
-            tokenizer = CLIPTokenizer.from_pretrained(original_path, subfolder="tokenizer")
+            tokenizer = CLIPTokenizer.from_pretrained(original_path + "/tokenizer")
         else:
             tokenizer = CLIPTokenizer.from_pretrained(original_path)
 
@@ -3707,19 +3724,19 @@ def prepare_accelerator(args: argparse.Namespace):
 
 
 def prepare_dtype(args: argparse.Namespace):
-    weight_dtype = torch.float32
+    weight_dtype = paddle.float32
     if args.mixed_precision == "fp16":
-        weight_dtype = torch.float16
+        weight_dtype = paddle.float16
     elif args.mixed_precision == "bf16":
-        weight_dtype = torch.bfloat16
+        weight_dtype = paddle.bfloat16
 
     save_dtype = None
     if args.save_precision == "fp16":
-        save_dtype = torch.float16
+        save_dtype = paddle.float16
     elif args.save_precision == "bf16":
-        save_dtype = torch.bfloat16
+        save_dtype = paddle.bfloat16
     elif args.save_precision == "float":
-        save_dtype = torch.float32
+        save_dtype = paddle.float32
 
     return weight_dtype, save_dtype
 
@@ -3773,12 +3790,12 @@ def _load_target_model(args: argparse.Namespace, weight_dtype, device="cpu", une
 # TODO remove this function in the future
 def transform_if_model_is_DDP(text_encoder, unet, network=None):
     # Transform text_encoder, unet and network from DistributedDataParallel
-    return (model.module if type(model) == DDP else model for model in [text_encoder, unet, network] if model is not None)
+    return (model._layers if type(model) == DDP else model for model in [text_encoder, unet, network] if model is not None)
 
 
 def transform_models_if_DDP(models):
     # Transform text_encoder, unet and network from DistributedDataParallel
-    return [model.module if type(model) == DDP else model for model in models if model is not None]
+    return [model._layers if type(model) == DDP else model for model in models if model is not None]
 
 
 def load_target_model(args, weight_dtype, accelerator, unet_use_linear_projection_in_v2=False):
@@ -3801,7 +3818,7 @@ def load_target_model(args, weight_dtype, accelerator, unet_use_linear_projectio
                 vae.to(accelerator.device)
 
             gc.collect()
-            torch.cuda.empty_cache()
+            # torch.cuda.empty_cache()
         accelerator.wait_for_everyone()
 
     text_encoder, unet = transform_if_model_is_DDP(text_encoder, unet)
@@ -3820,11 +3837,11 @@ def patch_accelerator_for_fp16_training(accelerator):
 
 def get_hidden_states(args: argparse.Namespace, input_ids, tokenizer, text_encoder, weight_dtype=None):
     # with no_token_padding, the length is not max length, return result immediately
-    if input_ids.size()[-1] != tokenizer.model_max_length:
+    if input_ids.shape[-1] != tokenizer.model_max_length:
         return text_encoder(input_ids)[0]
 
     # input_ids: b,n,77
-    b_size = input_ids.size()[0]
+    b_size = input_ids.shape[0]
     input_ids = input_ids.reshape((-1, tokenizer.model_max_length))  # batch_size*3, 77
 
     if args.clip_skip is None:
@@ -3866,7 +3883,7 @@ def get_hidden_states(args: argparse.Namespace, input_ids, tokenizer, text_encod
 
 
 def pool_workaround(
-    text_encoder: CLIPTextModelWithProjection, last_hidden_state: torch.Tensor, input_ids: torch.Tensor, eos_token_id: int
+    text_encoder: CLIPTextModelWithProjection, last_hidden_state: paddle.Tensor, input_ids: paddle.Tensor, eos_token_id: int
 ):
     r"""
     workaround for CLIP's pooling bug: it returns the hidden states for the max token id as the pooled output
@@ -3886,12 +3903,38 @@ def pool_workaround(
 
     # input_ids: b*n,77
     # find index for EOS token
-    eos_token_index = torch.where(input_ids == eos_token_id)[1]
-    eos_token_index = eos_token_index.to(device=last_hidden_state.device)
+    # eos_token_index = paddle.where(input_ids == eos_token_id)[1]
+    # eos_token_index = eos_token_index.to()
 
-    # get hidden states for EOS token
-    pooled_output = last_hidden_state[torch.arange(last_hidden_state.shape[0], device=last_hidden_state.device), eos_token_index]
+    # # get hidden states for EOS token
+    # pooled_output = last_hidden_state[paddle.arange(last_hidden_state.shape[0], device=last_hidden_state.device), eos_token_index]
 
+    if eos_token_id == 2:
+        # The `eos_token_id` was incorrect before PR #24773: Let's keep what have been done here.
+        # A CLIP model with such `eos_token_id` in the config can't work correctly with extra new tokens added
+        # ------------------------------------------------------------
+        # text_embeds.shape = [batch_size, sequence_length, transformer.width]
+        # take features from the eot embedding (eot_token is the highest number in each sequence)
+        # casting to paddle.int32 for onnx compatibility: argmax doesn't support int64 inputs with opset 14
+        pooled_output = last_hidden_state.gather_nd(
+            paddle.stack(
+                [paddle.arange(last_hidden_state.shape[0], dtype="int32"), input_ids.argmax(-1, dtype="int32")],
+                axis=-1,
+            )
+        )
+    else:
+        # The config gets updated `eos_token_id` from PR #24773 (so the use of exta new tokens is possible)
+        # We need to get the first position of `eos_token_id` value (`pad_token_ids` might equal to `eos_token_id`)
+        pooled_output = last_hidden_state.gather_nd(
+            paddle.stack(
+                [
+                    paddle.arange(last_hidden_state.shape[0], dtype="int32"),
+                    (input_ids == eos_token_id).cast("int32").argmax(axis=-1, dtype="int32"),
+                ],
+                axis=-1,
+            )
+        )
+            
     # apply projection: projection may be of different dtype than last_hidden_state
     pooled_output = text_encoder.text_projection(pooled_output.to(text_encoder.text_projection.weight.dtype))
     pooled_output = pooled_output.to(last_hidden_state.dtype)
@@ -3901,8 +3944,8 @@ def pool_workaround(
 
 def get_hidden_states_sdxl(
     max_token_length: int,
-    input_ids1: torch.Tensor,
-    input_ids2: torch.Tensor,
+    input_ids1: paddle.Tensor,
+    input_ids2: paddle.Tensor,
     tokenizer1: CLIPTokenizer,
     tokenizer2: CLIPTokenizer,
     text_encoder1: CLIPTextModel,
@@ -3910,7 +3953,7 @@ def get_hidden_states_sdxl(
     weight_dtype: Optional[str] = None,
 ):
     # input_ids: b,n,77 -> b*n, 77
-    b_size = input_ids1.size()[0]
+    b_size = input_ids1.shape[0]
     input_ids1 = input_ids1.reshape((-1, tokenizer1.model_max_length))  # batch_size*n, 77
     input_ids2 = input_ids2.reshape((-1, tokenizer2.model_max_length))  # batch_size*n, 77
 
@@ -3937,7 +3980,7 @@ def get_hidden_states_sdxl(
         for i in range(1, max_token_length, tokenizer1.model_max_length):
             states_list.append(hidden_states1[:, i : i + tokenizer1.model_max_length - 2])  # <BOS> の後から <EOS> の前まで
         states_list.append(hidden_states1[:, -1].unsqueeze(1))  # <EOS>
-        hidden_states1 = torch.cat(states_list, dim=1)
+        hidden_states1 = paddle.concat(states_list, axis=1)
 
         # v2: <BOS>...<EOS> <PAD> ... の三連を <BOS>...<EOS> <PAD> ... へ戻す　正直この実装でいいのかわからん
         states_list = [hidden_states2[:, 0].unsqueeze(1)]  # <BOS>
@@ -3951,7 +3994,7 @@ def get_hidden_states_sdxl(
             #             chunk[j, 0] = chunk[j, 1]  # 次の <PAD> の値をコピーする
             states_list.append(chunk)  # <BOS> の後から <EOS> の前まで
         states_list.append(hidden_states2[:, -1].unsqueeze(1))  # <EOS> か <PAD> のどちらか
-        hidden_states2 = torch.cat(states_list, dim=1)
+        hidden_states2 = paddle.concat(states_list, axis=1)
 
         # pool はnの最初のものを使う
         pool2 = pool2[::n_size]
@@ -4015,7 +4058,7 @@ def save_sd_model_on_epoch_end_or_stepwise(
     src_path: str,
     save_stable_diffusion_format: bool,
     use_safetensors: bool,
-    save_dtype: torch.dtype,
+    save_dtype: paddle.dtype,
     epoch: int,
     num_train_epochs: int,
     global_step: int,
@@ -4198,7 +4241,7 @@ def save_sd_model_on_train_end(
     src_path: str,
     save_stable_diffusion_format: bool,
     use_safetensors: bool,
-    save_dtype: torch.dtype,
+    save_dtype: paddle.dtype,
     epoch: int,
     global_step: int,
     text_encoder,
@@ -4256,12 +4299,12 @@ def save_sd_model_on_train_end_common(
 
 def get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents):
     # Sample noise that we'll add to the latents
-    noise = torch.randn_like(latents, device=latents.device)
+    noise = paddle.randn_like(latents, )
     if args.noise_offset:
         noise = custom_train_functions.apply_noise_offset(latents, noise, args.noise_offset, args.adaptive_noise_scale)
     elif args.multires_noise_iterations:
         noise = custom_train_functions.pyramid_noise_like(
-            noise, latents.device, args.multires_noise_iterations, args.multires_noise_discount
+            noise, args.multires_noise_iterations, args.multires_noise_discount
         )
 
     # Sample a random timestep for each image
@@ -4269,8 +4312,8 @@ def get_noise_noisy_latents_and_timesteps(args, noise_scheduler, latents):
     min_timestep = 0 if args.min_timestep is None else args.min_timestep
     max_timestep = noise_scheduler.config.num_train_timesteps if args.max_timestep is None else args.max_timestep
 
-    timesteps = torch.randint(min_timestep, max_timestep, (b_size,), device=latents.device)
-    timesteps = timesteps.long()
+    timesteps = paddle.randint(min_timestep, max_timestep, (b_size,), )
+    # timesteps = timesteps.long()
 
     # Add noise to the latents according to the noise magnitude at each timestep
     # (this is the forward diffusion process)
@@ -4402,10 +4445,9 @@ def sample_images_common(
     save_dir = args.output_dir + "/sample"
     os.makedirs(save_dir, exist_ok=True)
 
-    rng_state = torch.get_rng_state()
-    cuda_rng_state = torch.cuda.get_rng_state() if torch.cuda.is_available() else None
+    cuda_rng_state = paddle.get_cuda_rng_state()
 
-    with torch.no_grad():
+    with paddle.no_grad():
         # with accelerator.autocast():
         for i, prompt in enumerate(prompts):
             if not accelerator.is_main_process:
@@ -4476,8 +4518,7 @@ def sample_images_common(
                         print(ex)
 
             if seed is not None:
-                torch.manual_seed(seed)
-                torch.cuda.manual_seed(seed)
+                paddle.seed(seed)
 
             if prompt_replacement is not None:
                 prompt = prompt.replace(prompt_replacement[0], prompt_replacement[1])
@@ -4533,11 +4574,10 @@ def sample_images_common(
 
     # clear pipeline and cache to reduce vram usage
     del pipeline
-    torch.cuda.empty_cache()
+    # torch.cuda.empty_cache()
 
-    torch.set_rng_state(rng_state)
-    if cuda_rng_state is not None:
-        torch.cuda.set_rng_state(cuda_rng_state)
+    paddle.set_cuda_rng_state(cuda_rng_state)
+
     vae.to(org_vae_device)
 
 
@@ -4546,7 +4586,7 @@ def sample_images_common(
 # region 前処理用
 
 
-class ImageLoadingDataset(torch.utils.data.Dataset):
+class ImageLoadingDataset(paddle.io.Dataset):
     def __init__(self, image_paths):
         self.images = image_paths
 
@@ -4578,7 +4618,7 @@ class collater_class:
         self.dataset = dataset  # not used if worker_info is not None, in case of multiprocessing
 
     def __call__(self, examples):
-        worker_info = torch.utils.data.get_worker_info()
+        worker_info = paddle.io.get_worker_info()
         # worker_info is None in the main process
         if worker_info is not None:
             dataset = worker_info.dataset

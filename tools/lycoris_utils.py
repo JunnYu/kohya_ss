@@ -137,8 +137,8 @@ def extract_diff(
     LORA_PREFIX_TEXT_ENCODER = 'lora_te'
     def make_state_dict(
         prefix, 
-        root_module: torch.nn.Module,
-        target_module: torch.nn.Module,
+        root_module: paddle.nn.Layer,
+        target_module: paddle.nn.Layer,
         target_replace_modules,
         target_replace_names = []
     ):
@@ -197,17 +197,17 @@ def extract_diff(
                             )
                             extract_a = extract_a.transpose(0, 1)
                             extract_c = extract_c.transpose(0, 1)
-                            loras[f'{lora_name}.lora_mid.weight'] = extract_c.detach().cpu().contiguous().half()
+                            loras[f'{lora_name}.lora_mid.weight'] = extract_c.detach().cpu().half()
                             diff = child_module.weight - torch.einsum(
                                 'i j k l, j r, p i -> p r k l', 
                                 extract_c, extract_a.flatten(1, -1), extract_b.flatten(1, -1)
-                            ).detach().cpu().contiguous()
+                            ).detach().cpu()
                             del extract_c
                     else:
                         continue
                     if decompose_mode == 'low rank':
-                        loras[f'{lora_name}.lora_down.weight'] = extract_a.detach().cpu().contiguous().half()
-                        loras[f'{lora_name}.lora_up.weight'] = extract_b.detach().cpu().contiguous().half()
+                        loras[f'{lora_name}.lora_down.weight'] = extract_a.detach().cpu().half()
+                        loras[f'{lora_name}.lora_up.weight'] = extract_b.detach().cpu().half()
                         loras[f'{lora_name}.alpha'] = torch.Tensor([extract_a.shape[0]]).half()
                         if use_bias:
                             diff = diff.detach().cpu().reshape(extract_b.size(0), -1)
@@ -220,7 +220,7 @@ def extract_diff(
                             loras[f'{lora_name}.bias_size'] = torch.tensor(diff.shape).to(torch.int16)
                         del extract_a, extract_b, diff
                     elif decompose_mode == 'full':
-                        loras[f'{lora_name}.diff'] = weight.detach().cpu().contiguous().half()
+                        loras[f'{lora_name}.diff'] = weight.detach().cpu().half()
                     else:
                         raise NotImplementedError
             elif name in temp_name:
@@ -265,17 +265,17 @@ def extract_diff(
                         )
                         extract_a = extract_a.transpose(0, 1)
                         extract_c = extract_c.transpose(0, 1)
-                        loras[f'{lora_name}.lora_mid.weight'] = extract_c.detach().cpu().contiguous().half()
+                        loras[f'{lora_name}.lora_mid.weight'] = extract_c.detach().cpu().half()
                         diff = root_weight - torch.einsum(
                             'i j k l, j r, p i -> p r k l', 
                             extract_c, extract_a.flatten(1, -1), extract_b.flatten(1, -1)
-                        ).detach().cpu().contiguous()
+                        ).detach().cpu()
                         del extract_c
                 else:
                     continue
                 if decompose_mode == 'low rank':
-                    loras[f'{lora_name}.lora_down.weight'] = extract_a.detach().cpu().contiguous().half()
-                    loras[f'{lora_name}.lora_up.weight'] = extract_b.detach().cpu().contiguous().half()
+                    loras[f'{lora_name}.lora_down.weight'] = extract_a.detach().cpu().half()
+                    loras[f'{lora_name}.lora_up.weight'] = extract_b.detach().cpu().half()
                     loras[f'{lora_name}.alpha'] = torch.Tensor([extract_a.shape[0]]).half()
                     if use_bias:
                         diff = diff.detach().cpu().reshape(extract_b.size(0), -1)
@@ -288,7 +288,7 @@ def extract_diff(
                         loras[f'{lora_name}.bias_size'] = torch.tensor(diff.shape).to(torch.int16)
                     del extract_a, extract_b, diff
                 elif decompose_mode == 'full':
-                    loras[f'{lora_name}.diff'] = weight.detach().cpu().contiguous().half()
+                    loras[f'{lora_name}.diff'] = weight.detach().cpu().half()
                 else:
                     raise NotImplementedError
         return loras
@@ -364,7 +364,7 @@ def cp_weight(
     return torch.einsum('i j k l, i r -> r j k l', temp, wa)
 
 
-@torch.no_grad()
+@paddle.no_grad()
 def rebuild_weight(module_type, params, orig_weight, scale=1):
     if orig_weight is None:
         return orig_weight
@@ -450,7 +450,7 @@ def merge(
     merged = 0
     def merge_state_dict(
         prefix, 
-        root_module: torch.nn.Module,
+        root_module: paddle.nn.Layer,
         lyco_state_dict: Dict[str,torch.Tensor],
         target_replace_modules,
         target_replace_names = []

@@ -120,7 +120,7 @@ class Accelerator:
             - `"torch"`: the base torch random number generator
             - `"cuda"`: the CUDA random number generator (GPU only)
             - `"xla"`: the XLA random number generator (TPU only)
-            - `"generator"`: the `torch.Generator` of the sampler (or batch sampler if there is no sampler in your
+            - `"generator"`: the `paddle.Generator` of the sampler (or batch sampler if there is no sampler in your
               dataloader) or of the iterable dataset (if it exists) if the underlying dataset is of that type.
 
             Will default to `["torch"]` for PyTorch versions <=1.5.1 and `["generator"]` for PyTorch versions >= 1.6.
@@ -2052,7 +2052,7 @@ class Accelerator:
         >>> from ppaccelerate import Accelerator
 
         >>> accelerator = Accelerator()
-        >>> net = torch.nn.Linear(2, 2)
+        >>> net = paddle.nn.Linear(2, 2)
         >>> net = accelerator.prepare(net)
         >>> state_dict = accelerator.get_state_dict(net)
         ```

@@ -1,6 +1,6 @@
-import torch
-from ppaccelerate import init_empty_weights
-from ppaccelerate.utils.modeling import set_module_tensor_to_device
+import paddle
+# from ppaccelerate import init_empty_weights
+# from ppaccelerate.utils.modeling import set_module_tensor_to_device
 from safetensors.torch import load_file, save_file
 from paddlenlp.transformers import CLIPTextModel, CLIPTextConfig, CLIPTextModelWithProjection, CLIPTokenizer
 from typing import List
@@ -115,7 +115,7 @@ def convert_sdxl_text_encoder_2_checkpoint(checkpoint, max_length):
     for key in keys:
         if ".resblocks" in key and ".attn.in_proj_" in key:
             # 三つに分割
-            values = torch.chunk(checkpoint[key], 3)
+            values = paddle.chunk(checkpoint[key], 3)
 
             key_suffix = ".weight" if "weight" in key else ".bias"
             key_pfx = key.replace(SDXL_KEY_PREFIX + "transformer.resblocks.", "text_model.encoder.layers.")
@@ -127,7 +127,7 @@ def convert_sdxl_text_encoder_2_checkpoint(checkpoint, max_length):
             new_sd[key_pfx + "v_proj" + key_suffix] = values[2]
 
     # original SD にはないので、position_idsを追加
-    position_ids = torch.Tensor([list(range(max_length))]).to(torch.int64)
+    position_ids = paddle.to_ensor([list(range(max_length))]).to(paddle.int64)
     new_sd["text_model.embeddings.position_ids"] = position_ids
 
     # logit_scale はDiffusersには含まれないが、保存時に戻したいので別途返す
@@ -144,8 +144,9 @@ def _load_state_dict_on_device(model, state_dict, device, dtype=None):
 
     # similar to model.load_state_dict()
     if not missing_keys and not unexpected_keys:
-        for k in list(state_dict.keys()):
-            set_module_tensor_to_device(model, k, device, value=state_dict.pop(k), dtype=dtype)
+        model.load_dict(state_dict)
+        # for k in list(state_dict.keys()):
+            # set_module_tensor_to_device(model, k, device, value=state_dict.pop(k), dtype=dtype)
         return "<All keys matched successfully>"
 
     # error_msgs
@@ -172,7 +173,7 @@ def load_models_from_sdxl_checkpoint(model_version, ckpt_path, map_location, dty
         epoch = None
         global_step = None
     else:
-        checkpoint = torch.load(ckpt_path, map_location=map_location)
+        checkpoint = paddle.load(ckpt_path, map_location=map_location)
         if "state_dict" in checkpoint:
             state_dict = checkpoint["state_dict"]
             epoch = checkpoint.get("epoch", 0)
@@ -446,7 +447,7 @@ def convert_text_encoder_2_state_dict_to_sdxl(checkpoint, logit_scale):
             value_q = checkpoint[key_q]
             value_k = checkpoint[key_k]
             value_v = checkpoint[key_v]
-            value = torch.cat([value_q, value_k, value_v])
+            value = paddle.concat([value_q, value_k, value_v])
 
             new_key = key.replace("text_model.encoder.layers.", "transformer.resblocks.")
             new_key = new_key.replace(".self_attn.q_proj.", ".attn.in_proj_")

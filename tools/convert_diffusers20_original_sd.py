@@ -16,7 +16,7 @@ def convert(args):
     if args.fp16 or args.save_precision_as == "fp16":
         save_dtype = torch.float16
     elif args.bf16 or args.save_precision_as == "bf16":
-        save_dtype = torch.bfloat16
+        save_dtype = paddle.bfloat16
     elif args.float or args.save_precision_as == "float":
         save_dtype = torch.float
 

@@ -1,28 +1,28 @@
 # NAI compatible
 
-import torch
-
-
-class HypernetworkModule(torch.nn.Module):
+import paddle
+import paddle.nn
+from ppdiffusers.initializer import normal_, zeros_
+class HypernetworkModule(paddle.nn.Layer):
   def __init__(self, dim, multiplier=1.0):
     super().__init__()
 
-    linear1 = torch.nn.Linear(dim, dim * 2)
-    linear2 = torch.nn.Linear(dim * 2, dim)
-    linear1.weight.data.normal_(mean=0.0, std=0.01)
-    linear1.bias.data.zero_()
-    linear2.weight.data.normal_(mean=0.0, std=0.01)
-    linear2.bias.data.zero_()
+    linear1 = paddle.nn.Linear(dim, dim * 2)
+    linear2 = paddle.nn.Linear(dim * 2, dim)
+    normal_(linear1.weight, mean=0.0, std=0.01)
+    zeros_(linear1.bias)
+    normal_(linear2.weight, mean=0.0, std=0.01)
+    zeros_(linear2.bias)
     linears = [linear1, linear2]
 
-    self.linear = torch.nn.Sequential(*linears)
+    self.linear = paddle.nn.Sequential(*linears)
     self.multiplier = multiplier
 
   def forward(self, x):
     return x + self.linear(x) * self.multiplier
 
 
-class Hypernetwork(torch.nn.Module):
+class Hypernetwork(paddle.nn.Layer):
   enable_sizes = [320, 640, 768, 1280]
   # return self.modules[Hypernetwork.enable_sizes.index(size)]
 
@@ -31,8 +31,8 @@ class Hypernetwork(torch.nn.Module):
     self.modules = []
     for size in Hypernetwork.enable_sizes:
       self.modules.append((HypernetworkModule(size, multiplier), HypernetworkModule(size, multiplier)))
-      self.register_module(f"{size}_0", self.modules[-1][0])
-      self.register_module(f"{size}_1", self.modules[-1][1])
+      self.add_sublayer(f"{size}_0", self.modules[-1][0])
+      self.add_sublayer(f"{size}_1", self.modules[-1][1])
 
   def apply_to_stable_diffusion(self, text_encoder, vae, unet):
     blocks = unet.input_blocks + [unet.middle_block] + unet.output_blocks

@@ -20,7 +20,7 @@ def main(file):
   print(f"number of LoRA modules: {len(values)}")
 
   for key, value in values:
-    value = value.to(torch.float32)
+    value = value.to(paddle.float32)
     print(f"{key},{str(tuple(value.size())).replace(', ', '-')},{torch.mean(torch.abs(value))},{torch.min(torch.abs(value))}")
 
 

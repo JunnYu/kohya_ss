@@ -95,7 +95,7 @@ def cache_to_disk(args: argparse.Namespace) -> None:
 
     # mixed precisionに対応した型を用意しておき適宜castする
     weight_dtype, _ = train_util.prepare_dtype(args)
-    vae_dtype = torch.float32 if args.no_half_vae else weight_dtype
+    vae_dtype = paddle.float32 if args.no_half_vae else weight_dtype
 
     # モデルを読み込む
     print("load model")

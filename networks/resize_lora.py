@@ -215,7 +215,7 @@ def resize_lora_model(lora_sd, new_rank, save_dtype, device, dynamic_method, dyn
   block_down_name = None
   block_up_name = None
 
-  with torch.no_grad():
+  with paddle.no_grad():
     for key, value in tqdm(lora_sd.items()):
       weight_name = None
       if 'lora_down' in key:
@@ -263,8 +263,8 @@ def resize_lora_model(lora_sd, new_rank, save_dtype, device, dynamic_method, dyn
           verbose_str+=f"\n"
 
         new_alpha = param_dict['new_alpha']
-        o_lora_sd[block_down_name + "." + "lora_down.weight"] = param_dict["lora_down"].to(save_dtype).contiguous()
-        o_lora_sd[block_up_name + "." + "lora_up.weight"] = param_dict["lora_up"].to(save_dtype).contiguous()
+        o_lora_sd[block_down_name + "." + "lora_down.weight"] = param_dict["lora_down"].to(save_dtype)
+        o_lora_sd[block_up_name + "." + "lora_up.weight"] = param_dict["lora_up"].to(save_dtype)
         o_lora_sd[block_up_name + "." "alpha"] = torch.tensor(param_dict['new_alpha']).to(save_dtype)
 
         block_down_name = None
@@ -290,7 +290,7 @@ def resize(args):
     if p == 'fp16':
       return torch.float16
     if p == 'bf16':
-      return torch.bfloat16
+      return paddle.bfloat16
     return None
 
   if args.dynamic_method and not args.dynamic_param:

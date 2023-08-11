@@ -208,7 +208,7 @@ class NetworkTrainer:
 
         # mixed precisionに対応した型を用意しておき適宜castする
         weight_dtype, save_dtype = train_util.prepare_dtype(args)
-        vae_dtype = torch.float32 if args.no_half_vae else weight_dtype
+        vae_dtype = paddle.float32 if args.no_half_vae else weight_dtype
 
         # モデルを読み込む
         model_version, text_encoder, vae, unet = self.load_target_model(args, weight_dtype, accelerator)
@@ -248,7 +248,7 @@ class NetworkTrainer:
             vae.to(accelerator.device, dtype=vae_dtype)
             vae.requires_grad_(False)
             vae.eval()
-            with torch.no_grad():
+            with paddle.no_grad():
                 train_dataset_group.cache_latents(vae, args.vae_batch_size, args.cache_latents_to_disk, accelerator.is_main_process)
             vae.to("cpu")
             if torch.cuda.is_available():
@@ -732,7 +732,7 @@ class NetworkTrainer:
                 with accelerator.accumulate(network):
                     on_step_start(text_encoder, unet)
 
-                    with torch.no_grad():
+                    with paddle.no_grad():
                         if "latents" in batch and batch["latents"] is not None:
                             latents = batch["latents"].to(accelerator.device)
                         else:

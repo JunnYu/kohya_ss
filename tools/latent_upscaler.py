@@ -16,18 +16,18 @@ from tqdm import tqdm
 from PIL import Image
 
 
-class ResidualBlock(nn.Module):
+class ResidualBlock(nn.Layer):
     def __init__(self, in_channels, out_channels=None, kernel_size=3, stride=1, padding=1):
         super(ResidualBlock, self).__init__()
 
         if out_channels is None:
             out_channels = in_channels
 
-        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding, bias=False)
+        self.conv1 = nn.Conv2D(in_channels, out_channels, kernel_size, stride, padding, bias=False)
         self.bn1 = nn.BatchNorm2d(out_channels)
         self.relu1 = nn.ReLU(inplace=True)
 
-        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size, stride, padding, bias=False)
+        self.conv2 = nn.Conv2D(out_channels, out_channels, kernel_size, stride, padding, bias=False)
         self.bn2 = nn.BatchNorm2d(out_channels)
 
         self.relu2 = nn.ReLU(inplace=True)  # このReLUはresidualに足す前にかけるほうがいいかも
@@ -37,7 +37,7 @@ class ResidualBlock(nn.Module):
 
     def _initialize_weights(self):
         for m in self.modules():
-            if isinstance(m, nn.Conv2d):
+            if isinstance(m, nn.Conv2D):
                 nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
@@ -65,14 +65,14 @@ class ResidualBlock(nn.Module):
         return out
 
 
-class Upscaler(nn.Module):
+class Upscaler(nn.Layer):
     def __init__(self):
         super(Upscaler, self).__init__()
 
         # define layers
         # latent has 4 channels
 
-        self.conv1 = nn.Conv2d(4, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+        self.conv1 = nn.Conv2D(4, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
         self.bn1 = nn.BatchNorm2d(128)
         self.relu1 = nn.ReLU(inplace=True)
 
@@ -100,23 +100,23 @@ class Upscaler(nn.Module):
         self.resblock20 = ResidualBlock(128)
 
         # last convs
-        self.conv2 = nn.Conv2d(128, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+        self.conv2 = nn.Conv2D(128, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
         self.bn2 = nn.BatchNorm2d(64)
         self.relu2 = nn.ReLU(inplace=True)
 
-        self.conv3 = nn.Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
+        self.conv3 = nn.Conv2D(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), bias=False)
         self.bn3 = nn.BatchNorm2d(64)
         self.relu3 = nn.ReLU(inplace=True)
 
         # final conv: output 4 channels
-        self.conv_final = nn.Conv2d(64, 4, kernel_size=(1, 1), stride=(1, 1), padding=(0, 0))
+        self.conv_final = nn.Conv2D(64, 4, kernel_size=(1, 1), stride=(1, 1), padding=(0, 0))
 
         # initialize weights
         self._initialize_weights()
 
     def _initialize_weights(self):
         for m in self.modules():
-            if isinstance(m, nn.Conv2d):
+            if isinstance(m, nn.Conv2D):
                 nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
@@ -192,7 +192,7 @@ class Upscaler(nn.Module):
         vae: AutoencoderKL,
         lowreso_images: List[Image.Image],
         lowreso_latents: torch.Tensor,
-        dtype: torch.dtype,
+        dtype: paddle.dtype,
         width: int,
         height: int,
         batch_size: int = 1,
@@ -220,7 +220,7 @@ class Upscaler(nn.Module):
         upsampled_latents = []
         for i in tqdm(range(0, upsampled_images.shape[0], vae_batch_size)):
             batch = upsampled_images[i : i + vae_batch_size].to(vae.device)
-            with torch.no_grad():
+            with paddle.no_grad():
                 batch = vae.encode(batch).latent_dist.sample()
             upsampled_latents.append(batch)
 
@@ -230,7 +230,7 @@ class Upscaler(nn.Module):
         print("Upscaling latents...")
         upscaled_latents = []
         for i in range(0, upsampled_latents.shape[0], batch_size):
-            with torch.no_grad():
+            with paddle.no_grad():
                 upscaled_latents.append(self.forward(upsampled_latents[i : i + batch_size]))
         upscaled_latents = torch.cat(upscaled_latents, dim=0)
 
@@ -313,14 +313,14 @@ def upscale_images(args: argparse.Namespace):
     print("Decoding...")
     upscaled_images = []
     for i in tqdm(range(0, upscaled_latents.shape[0], args.vae_batch_size)):
-        with torch.no_grad():
+        with paddle.no_grad():
             batch = vae.decode(upscaled_latents[i : i + args.vae_batch_size]).sample
         batch = batch.to("cpu")
         upscaled_images.append(batch)
     upscaled_images = torch.cat(upscaled_images, dim=0)
 
     # tensor to numpy
-    upscaled_images = upscaled_images.permute(0, 2, 3, 1).numpy()
+    upscaled_images = upscaled_images.transpose([0, 2, 3, 1]).numpy()
     upscaled_images = (upscaled_images + 1.0) * 127.5
     upscaled_images = upscaled_images.clip(0, 255).astype(np.uint8)
 

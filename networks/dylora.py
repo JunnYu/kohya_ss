@@ -13,54 +13,56 @@ import math
 import os
 import random
 from typing import List, Tuple, Union
-import torch
-from torch import nn
+import paddle
+import paddle.nn.functional
+from paddle import nn
+from ppdiffusers.initializer import zeros_, kaiming_uniform_
 
-
-class DyLoRAModule(torch.nn.Module):
+class DyLoRAModule(paddle.nn.Layer):
     """
     replaces forward method of the original Linear, instead of replacing the original Linear module.
     """
 
     # NOTE: support dropout in future
-    def __init__(self, lora_name, org_module: torch.nn.Module, multiplier=1.0, lora_dim=4, alpha=1, unit=1):
+    def __init__(self, lora_name, org_module: paddle.nn.Layer, multiplier=1.0, lora_dim=4, alpha=1, unit=1):
         super().__init__()
         self.lora_name = lora_name
         self.lora_dim = lora_dim
         self.unit = unit
         assert self.lora_dim % self.unit == 0, "rank must be a multiple of unit"
 
-        if org_module.__class__.__name__ == "Conv2d":
-            in_dim = org_module.in_channels
-            out_dim = org_module.out_channels
+        if org_module.__class__.__name__ == "Conv2D":
+            in_dim = org_module._in_channels
+            out_dim = org_module._out_channels
         else:
-            in_dim = org_module.in_features
-            out_dim = org_module.out_features
+            in_features, out_features = org_module.weight.shape
+            in_dim = in_features
+            out_dim = out_features
 
-        if type(alpha) == torch.Tensor:
-            alpha = alpha.detach().float().numpy()  # without casting, bf16 causes error
+        if type(alpha) == paddle.Tensor:
+            alpha = alpha.detach().astype("float32").numpy()  # without casting, bf16 causes error
         alpha = self.lora_dim if alpha is None or alpha == 0 else alpha
         self.scale = alpha / self.lora_dim
-        self.register_buffer("alpha", torch.tensor(alpha))  # 定数として扱える
+        self.register_buffer("alpha", paddle.to_tensor(alpha))  # 定数として扱える
 
-        self.is_conv2d = org_module.__class__.__name__ == "Conv2d"
-        self.is_conv2d_3x3 = self.is_conv2d and org_module.kernel_size == (3, 3)
+        self.is_conv2d = org_module.__class__.__name__ == "Conv2D"
+        self.is_conv2d_3x3 = self.is_conv2d and tuple(org_module._kernel_size) == (3, 3)
 
         if self.is_conv2d and self.is_conv2d_3x3:
-            kernel_size = org_module.kernel_size
-            self.stride = org_module.stride
-            self.padding = org_module.padding
-            self.lora_A = nn.ParameterList([org_module.weight.new_zeros((1, in_dim, *kernel_size)) for _ in range(self.lora_dim)])
-            self.lora_B = nn.ParameterList([org_module.weight.new_zeros((out_dim, 1, 1, 1)) for _ in range(self.lora_dim)])
+            kernel_size = org_module._kernel_size
+            self.stride = org_module._stride
+            self.padding = org_module._padding
+            self.lora_A = nn.ParameterList([paddle.zeros((1, in_dim, *kernel_size)) for _ in range(self.lora_dim)])
+            self.lora_B = nn.ParameterList([paddle.zeros((out_dim, 1, 1, 1)) for _ in range(self.lora_dim)])
         else:
-            self.lora_A = nn.ParameterList([org_module.weight.new_zeros((1, in_dim)) for _ in range(self.lora_dim)])
-            self.lora_B = nn.ParameterList([org_module.weight.new_zeros((out_dim, 1)) for _ in range(self.lora_dim)])
+            self.lora_A = nn.ParameterList([paddle.zeros((1, in_dim)) for _ in range(self.lora_dim)])
+            self.lora_B = nn.ParameterList([paddle.zeros((out_dim, 1)) for _ in range(self.lora_dim)])
 
         # same as microsoft's
         for lora in self.lora_A:
-            torch.nn.init.kaiming_uniform_(lora, a=math.sqrt(5))
+            kaiming_uniform_(lora, a=math.sqrt(5))
         for lora in self.lora_B:
-            torch.nn.init.zeros_(lora)
+            zeros_(lora)
 
         self.multiplier = multiplier
         self.org_module = org_module  # remove in applying
@@ -79,32 +81,32 @@ class DyLoRAModule(torch.nn.Module):
 
         # 一部のパラメータを固定して、残りのパラメータを学習する
         for i in range(0, trainable_rank):
-            self.lora_A[i].requires_grad = False
-            self.lora_B[i].requires_grad = False
+            self.lora_A[i].stop_gradient = True
+            self.lora_B[i].stop_gradient = True
         for i in range(trainable_rank, trainable_rank + self.unit):
-            self.lora_A[i].requires_grad = True
-            self.lora_B[i].requires_grad = True
+            self.lora_A[i].stop_gradient = False
+            self.lora_B[i].stop_gradient = False
         for i in range(trainable_rank + self.unit, self.lora_dim):
-            self.lora_A[i].requires_grad = False
-            self.lora_B[i].requires_grad = False
+            self.lora_A[i].stop_gradient = True
+            self.lora_B[i].stop_gradient = True
 
-        lora_A = torch.cat(tuple(self.lora_A), dim=0)
-        lora_B = torch.cat(tuple(self.lora_B), dim=1)
+        lora_A = paddle.concat(tuple(self.lora_A), axis=0)
+        lora_B = paddle.concat(tuple(self.lora_B), axis=1)
 
         # calculate with lora_A and lora_B
         if self.is_conv2d_3x3:
-            ab = torch.nn.functional.conv2d(x, lora_A, stride=self.stride, padding=self.padding)
-            ab = torch.nn.functional.conv2d(ab, lora_B)
+            ab = paddle.nn.functional.conv2d(x, lora_A, stride=self.stride, padding=self.padding)
+            ab = paddle.nn.functional.conv2d(ab, lora_B)
         else:
             ab = x
             if self.is_conv2d:
-                ab = ab.reshape(ab.size(0), ab.size(1), -1).transpose(1, 2)  # (N, C, H, W) -> (N, H*W, C)
+                ab = ab.reshape([ab.shape[0], ab.shape[1], -1]).transpose([0, 2, 1, 3])  # (N, C, H, W) -> (N, H*W, C)
 
-            ab = torch.nn.functional.linear(ab, lora_A)
-            ab = torch.nn.functional.linear(ab, lora_B)
+            ab = paddle.nn.functional.linear(ab, lora_A)
+            ab = paddle.nn.functional.linear(ab, lora_B)
 
             if self.is_conv2d:
-                ab = ab.transpose(1, 2).reshape(ab.size(0), -1, *x.size()[2:])  # (N, H*W, C) -> (N, C, H, W)
+                ab = ab.transpose([0, 2, 1]).reshape([ab.shape[0], -1, *x.shape[2:]])  # (N, H*W, C) -> (N, C, H, W)
 
         # 最後の項は、低rankをより大きくするためのスケーリング（じゃないかな）
         result = result + ab * self.scale * math.sqrt(self.lora_dim / (trainable_rank + self.unit))
@@ -112,16 +114,16 @@ class DyLoRAModule(torch.nn.Module):
         # NOTE weightに加算してからlinear/conv2dを呼んだほうが速いかも
         return result
 
-    def state_dict(self, destination=None, prefix="", keep_vars=False):
+    def _state_dict(self, destination=None, prefix="", keep_vars=False):
         # state dictを通常のLoRAと同じにする:
         # nn.ParameterListは `.lora_A.0` みたいな名前になるので、forwardと同様にcatして入れ替える
-        sd = super().state_dict(destination=destination, prefix=prefix, keep_vars=keep_vars)
+        sd = super()._state_dict(destination=destination, prefix=prefix, keep_vars=keep_vars)
 
-        lora_A_weight = torch.cat(tuple(self.lora_A), dim=0)
+        lora_A_weight = paddle.concat(tuple(self.lora_A), axis=0)
         if self.is_conv2d and not self.is_conv2d_3x3:
             lora_A_weight = lora_A_weight.unsqueeze(-1).unsqueeze(-1)
 
-        lora_B_weight = torch.cat(tuple(self.lora_B), dim=1)
+        lora_B_weight = paddle.concat(tuple(self.lora_B), axis=1)
         if self.is_conv2d and not self.is_conv2d_3x3:
             lora_B_weight = lora_B_weight.unsqueeze(-1).unsqueeze(-1)
 
@@ -156,10 +158,10 @@ class DyLoRAModule(torch.nn.Module):
             lora_B_weight = lora_B_weight.squeeze(-1).squeeze(-1)
 
         state_dict.update(
-            {f"{self.lora_name}.lora_A.{i}": nn.Parameter(lora_A_weight[i].unsqueeze(0)) for i in range(lora_A_weight.size(0))}
+            {f"{self.lora_name}.lora_A.{i}": nn.Parameter(lora_A_weight[i].unsqueeze(0)) for i in range(lora_A_weight.shape[0])}
         )
         state_dict.update(
-            {f"{self.lora_name}.lora_B.{i}": nn.Parameter(lora_B_weight[:, i].unsqueeze(1)) for i in range(lora_B_weight.size(1))}
+            {f"{self.lora_name}.lora_B.{i}": nn.Parameter(lora_B_weight[:, i].unsqueeze(1)) for i in range(lora_B_weight.shape[1])}
         )
 
         super()._load_from_state_dict(state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
@@ -203,13 +205,8 @@ def create_network(multiplier, network_dim, network_alpha, vae, text_encoder, un
 # Create network from weights for inference, weights are not loaded here (because can be merged)
 def create_network_from_weights(multiplier, file, vae, text_encoder, unet, weights_sd=None, for_inference=False, **kwargs):
     if weights_sd is None:
-        if os.path.splitext(file)[1] == ".safetensors":
-            from safetensors.torch import load_file, safe_open
-
-            weights_sd = load_file(file)
-        else:
-            weights_sd = torch.load(file, map_location="cpu")
-
+        from ppdiffusers.utils import smart_load
+        weights_sd = smart_load(file)
     # get dim/alpha mapping
     modules_dim = {}
     modules_alpha = {}
@@ -221,7 +218,7 @@ def create_network_from_weights(multiplier, file, vae, text_encoder, unet, weigh
         if "alpha" in key:
             modules_alpha[lora_name] = value
         elif "lora_down" in key:
-            dim = value.size()[0]
+            dim = value.shape[0]
             modules_dim[lora_name] = dim
             # print(lora_name, value.size(), dim)
 
@@ -238,8 +235,8 @@ def create_network_from_weights(multiplier, file, vae, text_encoder, unet, weigh
     return network, weights_sd
 
 
-class DyLoRANetwork(torch.nn.Module):
-    UNET_TARGET_REPLACE_MODULE = ["Transformer2DModel"]
+class DyLoRANetwork(paddle.nn.Layer):
+    UNET_TARGET_REPLACE_MODULE = ["Transformer2DModel", "Attention"]
     UNET_TARGET_REPLACE_MODULE_CONV2D_3X3 = ["ResnetBlock2D", "Downsample2D", "Upsample2D"]
     TEXT_ENCODER_TARGET_REPLACE_MODULE = ["CLIPAttention", "CLIPMLP"]
     LORA_PREFIX_UNET = "lora_unet"
@@ -274,15 +271,15 @@ class DyLoRANetwork(torch.nn.Module):
                 print(f"apply LoRA to Conv2d with kernel size (3,3).")
 
         # create module instances
-        def create_modules(is_unet, root_module: torch.nn.Module, target_replace_modules) -> List[DyLoRAModule]:
+        def create_modules(is_unet, root_module: paddle.nn.Layer, target_replace_modules) -> List[DyLoRAModule]:
             prefix = DyLoRANetwork.LORA_PREFIX_UNET if is_unet else DyLoRANetwork.LORA_PREFIX_TEXT_ENCODER
             loras = []
-            for name, module in root_module.named_modules():
+            for name, module in root_module.named_sublayers():
                 if module.__class__.__name__ in target_replace_modules:
-                    for child_name, child_module in module.named_modules():
+                    for child_name, child_module in module.named_sublayers():
                         is_linear = child_module.__class__.__name__ == "Linear"
-                        is_conv2d = child_module.__class__.__name__ == "Conv2d"
-                        is_conv2d_1x1 = is_conv2d and child_module.kernel_size == (1, 1)
+                        is_conv2d = child_module.__class__.__name__ == "Conv2D"
+                        is_conv2d_1x1 = is_conv2d and tuple(child_module._kernel_size) == (1, 1)
 
                         if is_linear or is_conv2d:
                             lora_name = prefix + "." + name + "." + child_name
@@ -324,12 +321,8 @@ class DyLoRANetwork(torch.nn.Module):
             lora.multiplier = self.multiplier
 
     def load_weights(self, file):
-        if os.path.splitext(file)[1] == ".safetensors":
-            from safetensors.torch import load_file
-
-            weights_sd = load_file(file)
-        else:
-            weights_sd = torch.load(file, map_location="cpu")
+        from ppdiffusers.utils import smart_load
+        weights_sd = smart_load(file)
 
         info = self.load_state_dict(weights_sd, False)
         return info
@@ -347,7 +340,7 @@ class DyLoRANetwork(torch.nn.Module):
 
         for lora in self.text_encoder_loras + self.unet_loras:
             lora.apply_to()
-            self.add_module(lora.lora_name, lora)
+            self.add_sublayer(lora.lora_name, lora)
 
     """
     def merge_to(self, text_encoder, unet, weights_sd, dtype, device):
@@ -391,13 +384,13 @@ class DyLoRANetwork(torch.nn.Module):
         if self.text_encoder_loras:
             param_data = {"params": enumerate_params(self.text_encoder_loras)}
             if text_encoder_lr is not None:
-                param_data["lr"] = text_encoder_lr
+                param_data["learning_rate"] = text_encoder_lr
             all_params.append(param_data)
 
         if self.unet_loras:
             param_data = {"params": enumerate_params(self.unet_loras)}
             if unet_lr is not None:
-                param_data["lr"] = unet_lr
+                param_data["learning_rate"] = unet_lr
             all_params.append(param_data)
 
         return all_params
@@ -424,11 +417,11 @@ class DyLoRANetwork(torch.nn.Module):
         if dtype is not None:
             for key in list(state_dict.keys()):
                 v = state_dict[key]
-                v = v.detach().clone().to("cpu").to(dtype)
+                v = v.detach().clone().cpu().astype(dtype)
                 state_dict[key] = v
 
         if os.path.splitext(file)[1] == ".safetensors":
-            from safetensors.torch import save_file
+            from safetensors.paddle import save_file
             from library import train_util
 
             # Precalculate model hashes to save time on indexing
@@ -440,7 +433,7 @@ class DyLoRANetwork(torch.nn.Module):
 
             save_file(state_dict, file, metadata)
         else:
-            torch.save(state_dict, file)
+            paddle.save(state_dict, file)
 
     # mask is a tensor with values from 0 to 1
     def set_region(self, sub_prompt_index, is_last_network, mask):

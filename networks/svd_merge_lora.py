@@ -112,7 +112,7 @@ def merge_lora_models(models, ratios, new_rank, new_conv_rank, device, merge_dty
     # extract from merged weights
     print("extract new lora...")
     merged_lora_sd = {}
-    with torch.no_grad():
+    with paddle.no_grad():
         for lora_module_name, mat in tqdm(list(merged_sd.items())):
             conv2d = len(mat.size()) == 4
             kernel_size = None if not conv2d else mat.size()[2:4]
@@ -150,8 +150,8 @@ def merge_lora_models(models, ratios, new_rank, new_conv_rank, device, merge_dty
             up_weight = U
             down_weight = Vh
 
-            merged_lora_sd[lora_module_name + ".lora_up.weight"] = up_weight.to("cpu").contiguous()
-            merged_lora_sd[lora_module_name + ".lora_down.weight"] = down_weight.to("cpu").contiguous()
+            merged_lora_sd[lora_module_name + ".lora_up.weight"] = up_weight.to("cpu")
+            merged_lora_sd[lora_module_name + ".lora_down.weight"] = down_weight.to("cpu")
             merged_lora_sd[lora_module_name + ".alpha"] = torch.tensor(module_new_rank)
 
     # build minimum metadata
@@ -175,7 +175,7 @@ def merge(args):
         if p == "fp16":
             return torch.float16
         if p == "bf16":
-            return torch.bfloat16
+            return paddle.bfloat16
         return None
 
     merge_dtype = str_to_dtype(args.precision)

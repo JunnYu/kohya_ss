@@ -206,7 +206,7 @@ def train(args):
         vae.to(accelerator.device, dtype=weight_dtype)
         vae.requires_grad_(False)
         vae.eval()
-        with torch.no_grad():
+        with paddle.no_grad():
             train_dataset_group.cache_latents(
                 vae,
                 args.vae_batch_size,
@@ -374,7 +374,7 @@ def train(args):
         for step, batch in enumerate(train_dataloader):
             current_step.value = global_step
             with accelerator.accumulate(controlnet):
-                with torch.no_grad():
+                with paddle.no_grad():
                     if "latents" in batch and batch["latents"] is not None:
                         latents = batch["latents"].to(accelerator.device)
                     else:

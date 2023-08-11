@@ -3,8 +3,8 @@ import gc
 import math
 import os
 from typing import Optional
-import torch
-from ppaccelerate import init_empty_weights
+import paddle
+# from ppaccelerate import init_empty_weights
 from tqdm import tqdm
 from paddlenlp.transformers import CLIPTokenizer
 from library import model_util, sdxl_model_util, train_util, sdxl_original_unet
@@ -46,7 +46,7 @@ def load_target_model(args, accelerator, model_version: str, weight_dtype):
                 vae.to(accelerator.device)
 
             gc.collect()
-            torch.cuda.empty_cache()
+            # torch.cuda.empty_cache()
         accelerator.wait_for_everyone()
 
     text_encoder1, text_encoder2, unet = train_util.transform_models_if_DDP([text_encoder1, text_encoder2, unet])
@@ -72,12 +72,12 @@ def _load_target_model(name_or_path: str, vae_path: Optional[str], model_version
         # Diffusers model is loaded to CPU
         from ppdiffusers import StableDiffusionXLPipeline
 
-        variant = "fp16" if weight_dtype == torch.float16 else None
+        variant = "fp16" if weight_dtype == paddle.float16 else None
         print(f"load Diffusers pretrained models: {name_or_path}, variant={variant}")
         try:
             try:
                 pipe = StableDiffusionXLPipeline.from_pretrained(
-                    name_or_path, torch_dtype=weight_dtype, variant=variant, tokenizer=None
+                    name_or_path, paddle_dtype=weight_dtype, variant=variant, tokenizer=None
                 )
             except EnvironmentError as ex:
                 if variant is not None:
@@ -99,8 +99,7 @@ def _load_target_model(name_or_path: str, vae_path: Optional[str], model_version
 
         # Diffusers U-Net to original U-Net
         state_dict = sdxl_model_util.convert_diffusers_unet_state_dict_to_sdxl(unet.state_dict())
-        with init_empty_weights():
-            unet = sdxl_original_unet.SdxlUNet2DConditionModel()  # overwrite unet
+        unet = sdxl_original_unet.SdxlUNet2DConditionModel()  # overwrite unet
         sdxl_model_util._load_state_dict_on_device(unet, state_dict, device=device)
         print("U-Net converted to original U-Net")
 
@@ -156,22 +155,20 @@ def timestep_embedding(timesteps, dim, max_period=10000):
     :return: an [N x dim] Tensor of positional embeddings.
     """
     half = dim // 2
-    freqs = torch.exp(-math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half).to(
-        device=timesteps.device
-    )
+    freqs = paddle.exp(-math.log(max_period) * paddle.arange(start=0, end=half, dtype=paddle.float32) / half)
     args = timesteps[:, None].float() * freqs[None]
-    embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
+    embedding = paddle.concat([paddle.cos(args), paddle.sin(args)], axis=-1)
     if dim % 2:
-        embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
+        embedding = paddle.concat([embedding, paddle.zeros_like(embedding[:, :1])], axis=-1)
     return embedding
 
 
 def get_timestep_embedding(x, outdim):
     assert len(x.shape) == 2
     b, dims = x.shape[0], x.shape[1]
-    x = torch.flatten(x)
+    x = paddle.flatten(x)
     emb = timestep_embedding(x, outdim)
-    emb = torch.reshape(emb, (b, dims * outdim))
+    emb = paddle.reshape(emb, (b, dims * outdim))
     return emb
 
 
@@ -179,7 +176,7 @@ def get_size_embeddings(orig_size, crop_size, target_size, device):
     emb1 = get_timestep_embedding(orig_size, 256)
     emb2 = get_timestep_embedding(crop_size, 256)
     emb3 = get_timestep_embedding(target_size, 256)
-    vector = torch.cat([emb1, emb2, emb3], dim=1).to(device)
+    vector = paddle.concat([emb1, emb2, emb3], axis=1)
     return vector
 
 
@@ -188,7 +185,7 @@ def save_sd_model_on_train_end(
     src_path: str,
     save_stable_diffusion_format: bool,
     use_safetensors: bool,
-    save_dtype: torch.dtype,
+    save_dtype: paddle.dtype,
     epoch: int,
     global_step: int,
     text_encoder1,
@@ -240,7 +237,7 @@ def save_sd_model_on_epoch_end_or_stepwise(
     src_path,
     save_stable_diffusion_format: bool,
     use_safetensors: bool,
-    save_dtype: torch.dtype,
+    save_dtype: paddle.dtype,
     epoch: int,
     num_train_epochs: int,
     global_step: int,
