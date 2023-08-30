@@ -7,7 +7,7 @@
   "block_lr_zero_threshold": "",
   "bucket_no_upscale": true,
   "bucket_reso_steps": 1,
-  "cache_latents": true,
+  "cache_latents": false,
   "cache_latents_to_disk": false,
   "caption_dropout_every_n_epochs": 0.0,
   "caption_dropout_rate": 0.05,
@@ -43,7 +43,7 @@
   "mem_eff_attn": false,
   "mid_lr_weight": "",
   "min_snr_gamma": 10,
-  "mixed_precision": "bf16",
+  "mixed_precision": "no",
   "model_list": "runwayml/stable-diffusion-v1-5",
   "module_dropout": 0.1,
   "multires_noise_discount": 0.2,
@@ -100,5 +100,5 @@
   "vae_batch_size": 0,
   "wandb_api_key": "",
   "weighted_captions": false,
-  "xformers": true
+  "xformers": "sdpa"
 }

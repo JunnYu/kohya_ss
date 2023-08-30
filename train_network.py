@@ -11,7 +11,7 @@ from multiprocessing import Value
 import toml
 
 from tqdm import tqdm
-import torch
+import paddle
 from ppaccelerate.utils import set_seed
 from ppdiffusers import DDPMScheduler
 from library import model_util
@@ -52,35 +52,35 @@ class NetworkTrainer:
             logs["max_norm/average_key_norm"] = mean_norm
             logs["max_norm/max_key_norm"] = maximum_norm
 
-        lrs = lr_scheduler.get_last_lr()
+        base_lr = lr_scheduler.get_lr()
 
-        if args.network_train_text_encoder_only or len(lrs) <= 2:  # not block lr (or single block)
+        if args.network_train_text_encoder_only:  # not block lr (or single block)
             if args.network_train_unet_only:
-                logs["lr/unet"] = float(lrs[0])
+                logs["lr/unet"] = float(base_lr) * args.unet_lr
             elif args.network_train_text_encoder_only:
-                logs["lr/textencoder"] = float(lrs[0])
+                logs["lr/textencoder"] = float(base_lr) * args.text_encoder_lr
             else:
-                logs["lr/textencoder"] = float(lrs[0])
-                logs["lr/unet"] = float(lrs[-1])  # may be same to textencoder
+                logs["lr/textencoder"] = float(base_lr) * args.text_encoder_lr
+                logs["lr/unet"] = float(base_lr) * args.unet_lr # may be same to textencoder
 
-            if (
-                args.optimizer_type.lower().startswith("DAdapt".lower()) or args.optimizer_type.lower() == "Prodigy".lower()
-            ):  # tracking d*lr value of unet.
-                logs["lr/d*lr"] = (
-                    lr_scheduler.optimizers[-1].param_groups[0]["d"] * lr_scheduler.optimizers[-1].param_groups[0]["lr"]
-                )
+            # if (
+            #     args.optimizer_type.lower().startswith("DAdapt".lower()) or args.optimizer_type.lower() == "Prodigy".lower()
+            # ):  # tracking d*lr value of unet.
+            #     logs["lr/d*lr"] = (
+            #         lr_scheduler.optimizers[-1].param_groups[0]["d"] * lr_scheduler.optimizers[-1].param_groups[0]["lr"]
+            #     )
         else:
-            idx = 0
+            # idx = 0
             if not args.network_train_unet_only:
-                logs["lr/textencoder"] = float(lrs[0])
-                idx = 1
+                logs["lr/textencoder"] = float(base_lr) * args.text_encoder_lr
+            logs["lr/unet"] = float(base_lr) * args.unet_lr
 
-            for i in range(idx, len(lrs)):
-                logs[f"lr/group{i}"] = float(lrs[i])
-                if args.optimizer_type.lower().startswith("DAdapt".lower()) or args.optimizer_type.lower() == "Prodigy".lower():
-                    logs[f"lr/d*lr/group{i}"] = (
-                        lr_scheduler.optimizers[-1].param_groups[i]["d"] * lr_scheduler.optimizers[-1].param_groups[i]["lr"]
-                    )
+            # for i in range(idx, len(lrs)):
+            #     logs[f"lr/group{i}"] = float(lrs[i])
+            #     if args.optimizer_type.lower().startswith("DAdapt".lower()) or args.optimizer_type.lower() == "Prodigy".lower():
+            #         logs[f"lr/d*lr/group{i}"] = (
+            #             lr_scheduler.optimizers[-1].param_groups[i]["d"] * lr_scheduler.optimizers[-1].param_groups[i]["lr"]
+            #         )
 
         return logs
 
@@ -218,8 +218,8 @@ class NetworkTrainer:
 
         # モデルに xformers とか memory efficient attention を組み込む
         train_util.replace_unet_modules(unet, args.mem_eff_attn, args.xformers, args.sdpa)
-        if torch.__version__ >= "2.0.0":  # PyTorch 2.0.0 以上対応のxformersなら以下が使える
-            vae.set_use_memory_efficient_attention_xformers(args.xformers)
+        # if paddle.__version__ >= "2.0.0":  # PyTorch 2.0.0 以上対応のxformersなら以下が使える
+        vae.set_use_memory_efficient_attention_xformers(True)
 
         # 差分追加学習のためにモデルを読み込む
         sys.path.append(os.path.dirname(__file__))
@@ -251,8 +251,8 @@ class NetworkTrainer:
             with paddle.no_grad():
                 train_dataset_group.cache_latents(vae, args.vae_batch_size, args.cache_latents_to_disk, accelerator.is_main_process)
             vae.to("cpu")
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            # if torch.cuda.is_available():
+            #     torch.cuda.empty_cache()
             gc.collect()
 
             accelerator.wait_for_everyone()
@@ -296,7 +296,7 @@ class NetworkTrainer:
             args.scale_weight_norms = False
 
         train_unet = not args.network_train_text_encoder_only
-        train_text_encoder = not args.network_train_unet_only and not self.is_text_encoder_outputs_cached(args)
+        train_text_encoder = True #not args.network_train_unet_only and not self.is_text_encoder_outputs_cached(args)
         network.apply_to(text_encoder, unet, train_text_encoder, train_unet)
 
         if args.network_weights is not None:
@@ -322,13 +322,15 @@ class NetworkTrainer:
             )
             trainable_params = network.prepare_optimizer_params(args.text_encoder_lr, args.unet_lr)
 
-        optimizer_name, optimizer_args, optimizer = train_util.get_optimizer(args, trainable_params)
+        args.num_processes = accelerator.num_processes
+
+        optimizer_name, optimizer_args, optimizer, lr_scheduler = train_util.get_optimizer(args, trainable_params)
 
         # dataloaderを準備する
         # DataLoaderのプロセス数：0はメインプロセスになる
         n_workers = min(args.max_data_loader_n_workers, os.cpu_count() - 1)  # cpu_count-1 ただし最大で指定された数まで
 
-        train_dataloader = torch.utils.data.DataLoader(
+        train_dataloader = paddle.io.DataLoader(
             train_dataset_group,
             batch_size=1,
             shuffle=True,
@@ -350,27 +352,27 @@ class NetworkTrainer:
         train_dataset_group.set_max_train_steps(args.max_train_steps)
 
         # lr schedulerを用意する
-        lr_scheduler = train_util.get_scheduler_fix(args, optimizer, accelerator.num_processes)
+        # lr_scheduler = train_util.get_scheduler_fix(args, optimizer, accelerator.num_processes)
 
         # 実験的機能：勾配も含めたfp16/bf16学習を行う　モデル全体をfp16/bf16にする
-        if args.full_fp16:
-            assert (
-                args.mixed_precision == "fp16"
-            ), "full_fp16 requires mixed precision='fp16' / full_fp16を使う場合はmixed_precision='fp16'を指定してください。"
-            accelerator.print("enable full fp16 training.")
-            network.to(weight_dtype)
-        elif args.full_bf16:
-            assert (
-                args.mixed_precision == "bf16"
-            ), "full_bf16 requires mixed precision='bf16' / full_bf16を使う場合はmixed_precision='bf16'を指定してください。"
-            accelerator.print("enable full bf16 training.")
-            network.to(weight_dtype)
+        # if args.full_fp16:
+        #     assert (
+        #         args.mixed_precision == "fp16"
+        #     ), "full_fp16 requires mixed precision='fp16' / full_fp16を使う場合はmixed_precision='fp16'を指定してください。"
+        #     accelerator.print("enable full fp16 training.")
+        #     network.to(dtype=weight_dtype)
+        # elif args.full_bf16:
+        #     assert (
+        #         args.mixed_precision == "bf16"
+        #     ), "full_bf16 requires mixed precision='bf16' / full_bf16を使う場合はmixed_precision='bf16'を指定してください。"
+        #     accelerator.print("enable full bf16 training.")
+        #     network.to(dtype=weight_dtype)
 
         unet.requires_grad_(False)
         unet.to(dtype=weight_dtype)
         for t_enc in text_encoders:
             t_enc.requires_grad_(False)
-
+        
         # acceleratorがなんかよろしくやってくれるらしい
         # TODO めちゃくちゃ冗長なのでコードを整理する
         if train_unet and train_text_encoder:
@@ -411,7 +413,7 @@ class NetworkTrainer:
         # transform DDP after prepare (train_network here only)
         text_encoders = train_util.transform_models_if_DDP(text_encoders)
         unet, network = train_util.transform_models_if_DDP([unet, network])
-
+        
         if args.gradient_checkpointing:
             # according to TI example in Diffusers, train is required
             unet.train()
@@ -419,7 +421,9 @@ class NetworkTrainer:
                 t_enc.train()
 
                 # set top parameter requires_grad = True for gradient checkpointing works
-                t_enc.text_model.embeddings.requires_grad_(True)
+                # t_enc.text_model.embeddings.requires_grad_(True)
+                t_enc.text_model.token_embedding.requires_grad_(True)
+                t_enc.text_model.positional_embedding.requires_grad_(True)
         else:
             unet.eval()
             for t_enc in text_encoders:
@@ -435,8 +439,8 @@ class NetworkTrainer:
             vae.to(accelerator.device, dtype=vae_dtype)
 
         # 実験的機能：勾配も含めたfp16学習を行う　PyTorchにパッチを当ててfp16でのgrad scaleを有効にする
-        if args.full_fp16:
-            train_util.patch_accelerator_for_fp16_training(accelerator)
+        # if args.full_fp16:
+        #     train_util.patch_accelerator_for_fp16_training(accelerator)
 
         # resumeする
         train_util.resume_from_local_or_hf_if_specified(accelerator, args)
@@ -740,13 +744,13 @@ class NetworkTrainer:
                             latents = vae.encode(batch["images"].to(dtype=vae_dtype)).latent_dist.sample()
 
                             # NaNが含まれていれば警告を表示し0に置き換える
-                            if torch.any(torch.isnan(latents)):
+                            if paddle.any(paddle.isnan(latents)):
                                 accelerator.print("NaN found in latents, replacing with zeros")
-                                latents = torch.where(torch.isnan(latents), torch.zeros_like(latents), latents)
+                                latents = paddle.where(paddle.isnan(latents), paddle.zeros_like(latents), latents)
                         latents = latents * self.vae_scale_factor
                     b_size = latents.shape[0]
 
-                    with torch.set_grad_enabled(train_text_encoder):
+                    with paddle.set_grad_enabled(train_text_encoder):
                         # Get the text embedding for conditioning
                         if args.weighted_captions:
                             text_encoder_conds = get_weighted_text_embeddings(
@@ -780,7 +784,7 @@ class NetworkTrainer:
                     else:
                         target = noise
 
-                    loss = torch.nn.functional.mse_loss(noise_pred.float(), target.float(), reduction="none")
+                    loss = paddle.nn.functional.mse_loss(noise_pred.float(), target.float(), reduction="none")
                     loss = loss.mean([1, 2, 3])
 
                     loss_weights = batch["loss_weights"]  # 各sampleごとのweight
@@ -802,7 +806,7 @@ class NetworkTrainer:
 
                     optimizer.step()
                     lr_scheduler.step()
-                    optimizer.zero_grad(set_to_none=True)
+                    optimizer.zero_grad()
 
                 if args.scale_weight_norms:
                     keys_scaled, mean_norm, maximum_norm = network.apply_max_norm_regularization(

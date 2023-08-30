@@ -676,7 +676,7 @@ def train_model(
     lr_warmup_steps = round(float(int(lr_warmup) * int(max_train_steps) / 100))
     log.info(f'lr_warmup_steps = {lr_warmup_steps}')
 
-    run_cmd = f'accelerate launch --num_cpu_threads_per_process={num_cpu_threads_per_process}'
+    run_cmd = f'python '
     if sdxl:
         run_cmd += f' "./sdxl_train_network.py"'
     else:
@@ -1691,7 +1691,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--listen',
         type=str,
-        default='127.0.0.1',
+        default='0.0.0.0',
         help='IP to listen on for connections to Gradio',
     )
     parser.add_argument(
@@ -1703,7 +1703,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--server_port',
         type=int,
-        default=0,
+        default=8621,
         help='Port to run the server listener on',
     )
     parser.add_argument(

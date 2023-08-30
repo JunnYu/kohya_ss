@@ -63,7 +63,6 @@ from library.lpw_stable_diffusion import StableDiffusionLongPromptWeightingPipel
 import library.model_util as model_util
 import library.huggingface_util as huggingface_util
 import library.sai_model_spec as sai_model_spec
-
 # from library.attention_processors import FlashAttnProcessor
 # from library.hypernetwork import replace_attentions_for_hypernetwork
 from library.original_unet import UNet2DConditionModel
@@ -496,7 +495,7 @@ class ControlNetSubset(BaseSubset):
         return self.image_dir == other.image_dir and self.conditioning_data_dir == other.conditioning_data_dir
 
 
-class BaseDataset(torch.utils.data.Dataset):
+class BaseDataset(paddle.io.Dataset):
     def __init__(
         self,
         tokenizer: Union[CLIPTokenizer, List[CLIPTokenizer]],
@@ -1149,7 +1148,7 @@ class BaseDataset(torch.utils.data.Dataset):
                         input_ids2_list.append(token_caption2)
 
         example = {}
-        example["loss_weights"] = paddle.Tensor(loss_weights)
+        example["loss_weights"] = paddle.to_tensor(loss_weights)
 
         if len(text_encoder_outputs1_list) == 0:
             if self.token_padding_disabled:
@@ -1779,13 +1778,72 @@ class ControlNetDataset(BaseDataset):
             cond_img = self.conditioning_image_transforms(cond_img)
             conditioning_images.append(cond_img)
 
-        example["conditioning_images"] = paddle.stack(conditioning_images).to(memory_format=torch.contiguous_format).float()
+        example["conditioning_images"] = paddle.stack(conditioning_images).float()
 
         return example
 
 
+from paddle.io import IterableDataset
+import paddle
+import warnings
+import bisect
+
+
+class ConcatDataset(paddle.io.Dataset):
+    r"""Dataset as a concatenation of multiple datasets.
+
+    This class is useful to assemble different existing datasets.
+
+    Arguments:
+        datasets (sequence): List of datasets to be concatenated
+    """
+
+    @staticmethod
+    def cumsum(sequence):
+        r, s = [], 0
+        for e in sequence:
+            l = len(e)
+            r.append(l + s)
+            s += l
+        return r
+
+    def __init__(self, datasets):
+        super(ConcatDataset, self).__init__()
+        assert len(datasets) > 0, 'datasets should not be an empty iterable'
+        self.datasets = list(datasets)
+        for d in self.datasets:
+            assert not isinstance(
+                d, IterableDataset
+            ), "ConcatDataset does not support IterableDataset"
+        self.cumulative_sizes = self.cumsum(self.datasets)
+
+    def __len__(self):
+        return self.cumulative_sizes[-1]
+
+    def __getitem__(self, idx):
+        if idx < 0:
+            if -idx > len(self):
+                raise ValueError(
+                    "absolute value of index should not exceed dataset length")
+            idx = len(self) + idx
+        dataset_idx = bisect.bisect_right(self.cumulative_sizes, idx)
+        if dataset_idx == 0:
+            sample_idx = idx
+        else:
+            sample_idx = idx - self.cumulative_sizes[dataset_idx - 1]
+        return self.datasets[dataset_idx][sample_idx]
+
+    @property
+    def cummulative_sizes(self):
+        warnings.warn(
+            "cummulative_sizes attribute is renamed to "
+            "cumulative_sizes",
+            DeprecationWarning,
+            stacklevel=2)
+        return self.cumulative_sizes
+    
 # behave as Dataset mock
-class DatasetGroup(torch.utils.data.ConcatDataset):
+class DatasetGroup(ConcatDataset):
     def __init__(self, datasets: Sequence[Union[DreamBoothDataset, FineTuningDataset]]):
         self.datasets: List[Union[DreamBoothDataset, FineTuningDataset]]
 
@@ -2138,7 +2196,7 @@ def cache_batch_latents(
         info.latents_original_size = original_size
         info.latents_crop_ltrb = crop_ltrb
 
-    img_tensors = paddle.stack(images, dim=0)
+    img_tensors = paddle.stack(images, axis=0)
     img_tensors = img_tensors.to(device=vae.device, dtype=vae.dtype)
 
     with paddle.no_grad():
@@ -2277,7 +2335,6 @@ def calculate_sha256(filename):
         return "IsADirectory"
     except PermissionError:  # Windows
         return "IsADirectory"
-
 
 def precalculate_safetensors_hashes(tensors, metadata):
     """Precalculate the model hashes needed by sd-webui-additional-networks to
@@ -3322,7 +3379,8 @@ def get_optimizer(args, trainable_params):
 
     lr = args.learning_rate
     
-    lr = get_scheduler_fix(args, num_processes=args.num_processes)
+    lr_scheduler = get_scheduler_fix(args, num_processes=args.num_processes)
+    
     optimizer = None
 
     if optimizer_type == "Lion".lower():
@@ -3509,7 +3567,9 @@ def get_optimizer(args, trainable_params):
     elif optimizer_type == "AdamW".lower():
         print(f"use AdamW optimizer | {optimizer_kwargs}")
         optimizer_class = paddle.optimizer.AdamW
-        optimizer = optimizer_class(parameters=trainable_params, learning_rate=lr, **optimizer_kwargs)
+        optimizer = optimizer_class(parameters=trainable_params, learning_rate=lr_scheduler, **optimizer_kwargs)
+        # optimizer = optimizer_class(parameters=trainable_params[0]["params"], learning_rate=1e-4, **optimizer_kwargs)
+
 
     if optimizer is None:
         # 任意のoptimizerを使う
@@ -3528,7 +3588,8 @@ def get_optimizer(args, trainable_params):
     optimizer_name = optimizer_class.__module__ + "." + optimizer_class.__name__
     optimizer_args = ",".join([f"{k}={v}" for k, v in optimizer_kwargs.items()])
 
-    return optimizer_name, optimizer_args, optimizer, lr
+
+    return optimizer_name, optimizer_args, optimizer, lr_scheduler
 
 
 # Modified version of get_scheduler() function from ppdiffusers.optimizer.get_scheduler
@@ -3552,13 +3613,12 @@ def get_scheduler_fix(args, num_processes: int):
             value = ast.literal_eval(value)
             lr_scheduler_kwargs[key] = value
 
-    lr_scheduler_type = args.lr_scheduler_type
-    
-    from ppdiffusers.optimization import get_scheduler
 
+    from ppdiffusers.optimization import get_scheduler
+    # must 1.0 !!!!!!
     lr_scheduler = get_scheduler(
-        lr_scheduler_type,
-        learning_rate=args.learning_rate,
+        name,
+        learning_rate=1.0,
         num_warmup_steps=num_warmup_steps,
         num_training_steps=num_training_steps,
         num_cycles=num_cycles,
@@ -3714,6 +3774,7 @@ def prepare_accelerator(args: argparse.Namespace):
             if args.wandb_api_key is not None:
                 wandb.login(key=args.wandb_api_key)
 
+
     accelerator = Accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         mixed_precision=args.mixed_precision,
@@ -3725,10 +3786,11 @@ def prepare_accelerator(args: argparse.Namespace):
 
 def prepare_dtype(args: argparse.Namespace):
     weight_dtype = paddle.float32
-    if args.mixed_precision == "fp16":
-        weight_dtype = paddle.float16
-    elif args.mixed_precision == "bf16":
-        weight_dtype = paddle.bfloat16
+    # TODO 支持混合的数据类型。
+    # if args.mixed_precision == "fp16":
+    #     weight_dtype = paddle.float16
+    # elif args.mixed_precision == "bf16":
+    #     weight_dtype = paddle.bfloat16
 
     save_dtype = None
     if args.save_precision == "fp16":
@@ -3775,7 +3837,7 @@ def _load_target_model(args: argparse.Namespace, weight_dtype, device="cpu", une
             unet.config.use_linear_projection,
             unet.config.upcast_attention,
         )
-        original_unet.load_state_dict(unet.state_dict())
+        original_unet.set_dict(unet.state_dict())
         unet = original_unet
         print("U-Net converted to original U-Net")
 
@@ -3825,14 +3887,15 @@ def load_target_model(args, weight_dtype, accelerator, unet_use_linear_projectio
 
     return text_encoder, vae, unet, load_stable_diffusion_format
 
-
 def patch_accelerator_for_fp16_training(accelerator):
-    org_unscale_grads = accelerator.scaler._unscale_grads_
+    pass
+# def patch_accelerator_for_fp16_training(accelerator):
+#     org_unscale_grads = accelerator.scaler._unscale_grads_
 
-    def _unscale_grads_replacer(optimizer, inv_scale, found_inf, allow_fp16):
-        return org_unscale_grads(optimizer, inv_scale, found_inf, True)
+#     def _unscale_grads_replacer(optimizer, inv_scale, found_inf, allow_fp16):
+#         return org_unscale_grads(optimizer, inv_scale, found_inf, True)
 
-    accelerator.scaler._unscale_grads_ = _unscale_grads_replacer
+#     accelerator.scaler._unscale_grads_ = _unscale_grads_replacer
 
 
 def get_hidden_states(args: argparse.Namespace, input_ids, tokenizer, text_encoder, weight_dtype=None):
@@ -3849,7 +3912,7 @@ def get_hidden_states(args: argparse.Namespace, input_ids, tokenizer, text_encod
     else:
         enc_out = text_encoder(input_ids, output_hidden_states=True, return_dict=True)
         encoder_hidden_states = enc_out["hidden_states"][-args.clip_skip]
-        encoder_hidden_states = text_encoder.text_model.final_layer_norm(encoder_hidden_states)
+        encoder_hidden_states = text_encoder.text_model.ln_final(encoder_hidden_states)
 
     # bs*3, 77, 768 or 1024
     encoder_hidden_states = encoder_hidden_states.reshape((b_size, -1, encoder_hidden_states.shape[-1]))
@@ -4365,8 +4428,8 @@ def sample_images_common(
         print(f"No prompt file / プロンプトファイルがありません: {args.sample_prompts}")
         return
 
-    org_vae_device = vae.device  # CPUにいるはず
-    vae.to(device)
+    # org_vae_device = vae.device  # CPUにいるはず
+    # vae.to(device)
 
     # read prompts
 
@@ -4537,17 +4600,17 @@ def sample_images_common(
             print(f"width: {width}")
             print(f"sample_steps: {sample_steps}")
             print(f"scale: {scale}")
-            with accelerator.autocast():
-                latents = pipeline(
-                    prompt=prompt,
-                    height=height,
-                    width=width,
-                    num_inference_steps=sample_steps,
-                    guidance_scale=scale,
-                    negative_prompt=negative_prompt,
-                    controlnet=controlnet,
-                    controlnet_image=controlnet_image,
-                )
+            # with accelerator.autocast():
+            latents = pipeline(
+                prompt=prompt,
+                height=height,
+                width=width,
+                num_inference_steps=sample_steps,
+                guidance_scale=scale,
+                negative_prompt=negative_prompt,
+                controlnet=controlnet,
+                controlnet_image=controlnet_image,
+            )
 
             image = pipeline.latents_to_image(latents)[0]
 
@@ -4560,17 +4623,43 @@ def sample_images_common(
 
             image.save(os.path.join(save_dir, img_filename))
 
-            # wandb有効時のみログを送信
-            try:
-                wandb_tracker = accelerator.get_tracker("wandb")
-                try:
-                    import wandb
-                except ImportError:  # 事前に一度確認するのでここはエラー出ないはず
-                    raise ImportError("No wandb / wandb がインストールされていないようです")
+            if epoch is not None:
+                sps = epoch
+            else:
+                sps = steps
+            images = [image]
+            for tracker in accelerator.trackers:
+                if tracker.name == "tensorboard":
+                    np_images = np.stack([np.asarray(img) for img in images])
+                    tracker.writer.add_images("validation", np_images, sps, dataformats="NHWC")
+                elif tracker.name == "visualdl":
+                    np_images = np.stack([np.asarray(img) for img in images])
+                    tracker.writer.add_images("validation", np_images, sps, dataformats="NHWC")
+                elif tracker.name == "wandb":
+                    try:
+                        import wandb
+                    except ImportError:  # 事前に一度確認するのでここはエラー出ないはず
+                        raise ImportError("No wandb / wandb がインストールされていないようです")
+                    tracker.log(
+                        {
+                            "validation": [
+                                wandb.Image(image, caption=f"{i}: {prompt}")
+                                for i, image in enumerate(images)
+                            ]
+                        }
+                    )
 
-                wandb_tracker.log({f"sample_{i}": wandb.Image(image)})
-            except:  # wandb 無効時
-                pass
+            # wandb有効時のみログを送信
+            # try:
+            #     wandb_tracker = accelerator.get_tracker("wandb")
+            #     try:
+            #         import wandb
+            #     except ImportError:  # 事前に一度確認するのでここはエラー出ないはず
+            #         raise ImportError("No wandb / wandb がインストールされていないようです")
+
+            #     wandb_tracker.log({f"sample_{i}": wandb.Image(image)})
+            # except:  # wandb 無効時
+            #     pass
 
     # clear pipeline and cache to reduce vram usage
     del pipeline
@@ -4578,7 +4667,7 @@ def sample_images_common(
 
     paddle.set_cuda_rng_state(cuda_rng_state)
 
-    vae.to(org_vae_device)
+    # vae.to(org_vae_device)
 
 
 # endregion

@@ -122,7 +122,7 @@ class AdvancedTraining:
             #     label='Use 8bit adam', value=False, visible=False
             # )
             # self.xformers = gr.Checkbox(label='Use xformers', value=True, info='Use xformers for CrossAttention')
-            self.xformers = gr.Dropdown(label='CrossAttention', choices=["none", "sdpa", "xformers"], value='xformers')
+            self.xformers = gr.Dropdown(label='CrossAttention', choices=["none", "sdpa", ], value='none')
             self.color_aug = gr.Checkbox(label='Color augmentation', value=False)
             self.flip_aug = gr.Checkbox(label='Flip augmentation', value=False)
             self.min_snr_gamma = gr.Slider(
@@ -237,7 +237,7 @@ class AdvancedTraining:
             self.max_data_loader_n_workers = gr.Textbox(
                 label='Max num workers for DataLoader',
                 placeholder='(Optional) Override number of epoch. Default: 8',
-                value='0',
+                value='8',
             )
         with gr.Row():
             self.wandb_api_key = gr.Textbox(

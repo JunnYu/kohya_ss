@@ -89,7 +89,7 @@ class LoRAModule(paddle.nn.Layer):
 
         # module dropout
         if self.module_dropout is not None and self.training:
-            if paddle.rand(1) < self.module_dropout:
+            if paddle.rand((1,)).item() < self.module_dropout:
                 return org_forwarded
 
         lx = self.lora_down(x)
@@ -114,7 +114,7 @@ class LoRAModule(paddle.nn.Layer):
             scale = self.scale
 
         lx = self.lora_up(lx)
-
+        
         return org_forwarded + lx * self.multiplier * scale
 
 
@@ -731,7 +731,7 @@ class LoRANetwork(paddle.nn.Layer):
 
     UNET_TARGET_REPLACE_MODULE = ["Transformer2DModel"]
     UNET_TARGET_REPLACE_MODULE_CONV2D_3X3 = ["ResnetBlock2D", "Downsample2D", "Upsample2D"]
-    TEXT_ENCODER_TARGET_REPLACE_MODULE = ["CLIPAttention", "CLIPMLP"]
+    TEXT_ENCODER_TARGET_REPLACE_MODULE = ["TransformerEncoderLayer"] #["CLIPAttention", "CLIPMLP"]
     LORA_PREFIX_UNET = "lora_unet"
     LORA_PREFIX_TEXT_ENCODER = "lora_te"
 
@@ -1005,6 +1005,10 @@ class LoRANetwork(paddle.nn.Layer):
 
     # 二つのText Encoderに別々の学習率を設定できるようにするといいかも
     def prepare_optimizer_params(self, text_encoder_lr, unet_lr, default_lr):
+        # make sure default_lr is None
+        default_lr = None
+        assert default_lr is None
+        
         self.requires_grad_(True)
         all_params = []
 
@@ -1072,16 +1076,30 @@ class LoRANetwork(paddle.nn.Layer):
         if dtype is not None:
             for key in list(state_dict.keys()):
                 v = state_dict[key]
-                v = v.detach().clone().to("cpu").to(dtype)
+                v = v.detach().clone().to(dtype).to("cpu")
                 state_dict[key] = v
 
         if os.path.splitext(file)[1] == ".safetensors":
-            from safetensors.paddle import save_file
+            from safetensors.torch import save_file
             from library import train_util
 
             # Precalculate model hashes to save time on indexing
             if metadata is None:
                 metadata = {}
+            
+            ############# TODO save torch format
+            import torch
+            new_state_dict = {}
+            for k, v in state_dict.items():
+                if "lora_te" in k:
+                    k = k.replace("_transformer_", "_encoder_").replace("linear1", "mlp_fc1").replace("linear2", "mlp_fc2")
+                if v.ndim ==2:
+                    new_state_dict[k] = torch.from_numpy(v.t().numpy())
+                else:
+                    new_state_dict[k] = torch.from_numpy(v.numpy())
+            state_dict = new_state_dict
+            
+            
             model_hash, legacy_hash = train_util.precalculate_safetensors_hashes(state_dict, metadata)
             metadata["sshs_model_hash"] = model_hash
             metadata["sshs_legacy_hash"] = legacy_hash

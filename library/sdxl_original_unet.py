@@ -71,11 +71,11 @@ from .attention_processors import FlashAttentionFunction
 
 
 def get_parameter_dtype(parameter: paddle.nn.Layer):
-    return next(parameter.parameters()).dtype
+    return next(parameter.named_parameters())[1].dtype
 
 
 def get_parameter_device(parameter: paddle.nn.Layer):
-    return next(parameter.parameters()).place
+    return next(parameter.named_parameters())[1].place
 
 
 

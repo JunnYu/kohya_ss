@@ -918,7 +918,7 @@ class SdxlStableDiffusionLongPromptWeightingPipeline:
         # 5. set timesteps
         self.scheduler.set_timesteps(num_inference_steps)
         timesteps, num_inference_steps = self.get_timesteps(num_inference_steps, strength, image is None)
-        latent_timestep = timesteps[:1].repeat(batch_size * num_images_per_prompt)
+        latent_timestep = timesteps[:1].tile((batch_size * num_images_per_prompt,))
 
         # 6. Prepare latent variables
         latents, init_latents_orig, noise = self.prepare_latents(

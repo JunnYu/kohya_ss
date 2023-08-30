@@ -6,7 +6,7 @@ from multiprocessing import Value
 import os
 
 from ppaccelerate.utils import set_seed
-import torch
+import paddle
 from tqdm import tqdm
 
 from library import config_util

@@ -51,13 +51,15 @@ def get_mixed_precision_context_manager(native_amp: bool = False, autocast_kwarg
         autocast_kwargs = autocast_kwargs.to_kwargs()
     if native_amp:
         if state.mixed_precision == "fp16":
-            return paddle.amp.auto_cast( dtype="float16", **autocast_kwargs)
+            autocast_kwargs["dtype"] = "float16"
+            return paddle.amp.amp_guard(**autocast_kwargs)
         elif state.mixed_precision == "bf16" and state.distributed_type in [
             DistributedType.NO,
             DistributedType.MULTI_GPU,
         ]:
-            return paddle.amp.auto_cast(dtype="bfloat16", **autocast_kwargs)
+            autocast_kwargs["dtype"] = "bfloat16"
+            return paddle.amp.amp_guard(**autocast_kwargs)
         else:
-            return paddle.amp.auto_cast( **autocast_kwargs)
+            return paddle.amp.amp_guard( **autocast_kwargs)
     else:
         return contextlib.nullcontext()

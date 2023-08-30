@@ -204,7 +204,7 @@ if __name__ == "__main__":
             with paddle.no_grad():
                 enc_out = text_model1(tokens, output_hidden_states=True, return_dict=True)
                 text_embedding1 = enc_out["hidden_states"][11]
-                # text_embedding = pipe.text_encoder.text_model.final_layer_norm(text_embedding)    # layer normは通さないらしい
+                # text_embedding = pipe.text_encoder.text_model.ln_final(text_embedding)    # layer normは通さないらしい
 
             # text encoder 2
             with paddle.no_grad():

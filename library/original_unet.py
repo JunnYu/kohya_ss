@@ -313,11 +313,11 @@ from .attention_processors import FlashAttentionFunction
 
 
 def get_parameter_dtype(parameter: paddle.nn.Layer):
-    return next(parameter.parameters()).dtype
+    return next(parameter.named_parameters())[1].dtype
 
 
 def get_parameter_device(parameter: paddle.nn.Layer):
-    return next(parameter.parameters()).place
+    return next(parameter.named_parameters())[1].place
 
 
 def get_timestep_embedding(
@@ -579,7 +579,7 @@ class CrossAttention(nn.Layer):
         batch_size, seq_len, dim = tensor.shape
         head_size = self.heads
         tensor = tensor.reshape([batch_size, seq_len, head_size, dim // head_size])
-        tensor = tensor.transpose([0, 2, 1, 3]).reshape(batch_size * head_size, seq_len, dim // head_size)
+        tensor = tensor.transpose([0, 2, 1, 3]).reshape([batch_size * head_size, seq_len, dim // head_size])
         return tensor
 
     def reshape_batch_dim_to_heads(self, tensor):

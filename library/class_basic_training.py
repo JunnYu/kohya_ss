@@ -74,7 +74,7 @@ class BasicTraining:
             self.lr_scheduler = gr.Dropdown(
                 label='LR Scheduler',
                 choices=[
-                    'adafactor',
+                    # 'adafactor',
                     'constant',
                     'constant_with_warmup',
                     'cosine',

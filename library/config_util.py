@@ -423,7 +423,13 @@ def generate_dataset_group_by_blueprint(dataset_group_blueprint: DatasetGroupBlu
       dataset_klass = FineTuningDataset
 
     subsets = [subset_klass(**asdict(subset_blueprint.params)) for subset_blueprint in dataset_blueprint.subsets]
-    dataset = dataset_klass(subsets=subsets, **asdict(dataset_blueprint.params))
+    # print(dataset_blueprint.params)
+    # 由于tokenizer不可以序列化，因此需要pop一下还原。
+    tokenizer = dataset_blueprint.params.tokenizer
+    dataset_blueprint.params.tokenizer = None
+    params_dict = asdict(dataset_blueprint.params)
+    params_dict["tokenizer"] = tokenizer
+    dataset = dataset_klass(subsets=subsets, **params_dict)
     datasets.append(dataset)
 
   # print info

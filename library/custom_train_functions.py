@@ -320,7 +320,7 @@ def get_unweighted_text_embeddings(
             else:
                 enc_out = text_encoder(text_input_chunk, output_hidden_states=True, return_dict=True)
                 text_embedding = enc_out["hidden_states"][-clip_skip]
-                text_embedding = text_encoder.text_model.final_layer_norm(text_embedding)
+                text_embedding = text_encoder.text_model.ln_final(text_embedding)
 
             if no_boseos_middle:
                 if i == 0:
@@ -341,7 +341,7 @@ def get_unweighted_text_embeddings(
         else:
             enc_out = text_encoder(text_input, output_hidden_states=True, return_dict=True)
             text_embeddings = enc_out["hidden_states"][-clip_skip]
-            text_embeddings = text_encoder.text_model.final_layer_norm(text_embeddings)
+            text_embeddings = text_encoder.text_model.ln_final(text_embeddings)
     return text_embeddings
 
 

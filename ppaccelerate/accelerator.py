@@ -274,6 +274,13 @@ class Accelerator:
         if self.state.mixed_precision == "fp16":
             self.native_amp = True
             kwargs = self.scaler_handler.to_kwargs() if self.scaler_handler is not None else {}
+            
+            # 修改 GradScaler 的默认值
+            if len(kwargs) == 0:
+                kwargs = {
+                    "init_loss_scaling":65536.0,
+                    "incr_every_n_steps":2000,
+                }
             self.scaler = paddle.amp.GradScaler(**kwargs)
 
         elif self.state.mixed_precision == "bf16":

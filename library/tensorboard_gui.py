@@ -20,7 +20,7 @@ def start_tensorboard(logging_dir, wait_time=5):
         msgbox(msg='Error: log folder is empty')
         return
 
-    run_cmd = [TENSORBOARD, '--logdir', logging_dir, '--host', '0.0.0.0', '--port', '6006']
+    run_cmd = [TENSORBOARD, '--logdir', logging_dir, '--host', '0.0.0.0', '--port', '8064']
 
     log.info(run_cmd)
     if tensorboard_proc is not None:

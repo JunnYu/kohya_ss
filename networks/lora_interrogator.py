@@ -73,7 +73,7 @@ def interrogate(args):
         else:
           enc_out = text_encoder(batch, output_hidden_states=True, return_dict=True)
           encoder_hidden_states = enc_out['hidden_states'][-args.clip_skip]
-          encoder_hidden_states = text_encoder.text_model.final_layer_norm(encoder_hidden_states)
+          encoder_hidden_states = text_encoder.text_model.ln_final(encoder_hidden_states)
         encoder_hidden_states = encoder_hidden_states.to("cpu")
 
         embs.extend(encoder_hidden_states)

@@ -139,7 +139,7 @@ class GradScalerKwargs(KwargsHandler):
     ```
     """
     enable: bool = True
-    init_loss_scaling:float =65536.0
+    init_loss_scaling:float = 65536.0
     incr_ratio:float=2.0
     decr_ratio:float=0.5
     incr_every_n_steps:int = 2000

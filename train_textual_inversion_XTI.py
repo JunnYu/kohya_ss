@@ -335,7 +335,7 @@ def train(args):
     # Freeze all parameters except for the token embeddings in text encoder
     text_encoder.requires_grad_(True)
     text_encoder.text_model.encoder.requires_grad_(False)
-    text_encoder.text_model.final_layer_norm.requires_grad_(False)
+    text_encoder.text_model.ln_final.requires_grad_(False)
     text_encoder.text_model.embeddings.position_embedding.requires_grad_(False)
     # text_encoder.text_model.embeddings.token_embedding.requires_grad_(True)
 

@@ -1260,8 +1260,7 @@ def load_vae(vae_id, dtype):
         except EnvironmentError as e:
             print(f"exception occurs in loading vae: {e}")
             print("retry with subfolder='vae'")
-            vae = AutoencoderKL.from_pretrained(vae_id, subfolder="vae",         except EnvironmentError as e:
-=dtype)
+            vae = AutoencoderKL.from_pretrained(vae_id, subfolder="vae", paddle_dtype=dtype)
         return vae
 
     # local

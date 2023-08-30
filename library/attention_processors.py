@@ -66,6 +66,8 @@ def tensor_to(self, dtype=None, device=None, blocking=None):
             device = dtype
             dtype = None
 
+    if device is not None and "Place" in str(device):
+        device = str(device).lstrip("Place(").rstrip(")")
     return self._to(dtype=dtype, device=device, blocking=blocking)
 
 if not hasattr(paddle.Tensor, "to"):
